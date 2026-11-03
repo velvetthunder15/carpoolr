@@ -21,10 +21,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -34,7 +36,11 @@ import com.carpoolr.app.ui.components.CarpoolrTopBar
 import com.carpoolr.app.ui.components.ProfileContent
 import com.carpoolr.app.ui.components.SideSheet
 import com.carpoolr.app.ui.components.Tab
+import com.carpoolr.app.connect.ConnectionStore
+import com.carpoolr.app.connect.Provider
+import com.carpoolr.app.connect.openProviderApp
 import com.carpoolr.app.ui.screens.HomeScreen
+import com.carpoolr.app.ui.screens.WebLoginScreen
 import com.carpoolr.app.ui.screens.PlaceholderScreen
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -43,7 +49,11 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 fun CarpoolrApp() {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var profileOpen by rememberSaveable { mutableStateOf(false) }
+    var signingInTo by rememberSaveable { mutableStateOf<String?>(null) }
+    var connectionsVersion by remember { mutableIntStateOf(0) }
     val view = LocalView.current
+    val context = LocalContext.current
+    val connections = remember { ConnectionStore(context) }
 
     // backgroundBackdrop: only the green field, sampled by glass cards inside the content.
     // contentBackdrop: everything on screen, sampled by the floating top bar, tab bar and sheets.
@@ -116,6 +126,31 @@ fun CarpoolrApp() {
             fromStart = false,
             backdrop = contentBackdrop,
             onDismiss = { profileOpen = false }
-        ) { ProfileContent(onClose = { profileOpen = false }) }
+        ) {
+            ProfileContent(
+                onClose = { profileOpen = false },
+                isConnected = { p ->
+                    connectionsVersion // re-read after a sign-in
+                    connections.isConnected(p)
+                },
+                onConnect = { p ->
+                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    if (p.signsInOnWeb) signingInTo = p.name else openProviderApp(context, p)
+                }
+            )
+        }
+
+        signingInTo?.let { name ->
+            val provider = Provider.valueOf(name)
+            WebLoginScreen(
+                provider = provider,
+                onDone = {
+                    connections.markSignedIn(provider)
+                    connectionsVersion++
+                    signingInTo = null
+                },
+                onCancel = { signingInTo = null }
+            )
+        }
     }
 }

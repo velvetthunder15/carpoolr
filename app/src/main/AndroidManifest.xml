@@ -2,6 +2,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Package visibility (Android 11+) so carpoolr can open the ride apps. -->
+    <queries>
+        <package android:name="com.ubercab" />
+        <package android:name="com.olacabs.customer" />
+        <package android:name="com.rapido.passenger" />
+    </queries>
 
     <application
         android:allowBackup="true"

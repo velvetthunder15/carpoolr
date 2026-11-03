@@ -38,6 +38,8 @@ import com.carpoolr.app.R
 import com.carpoolr.app.ui.theme.Anton
 import com.carpoolr.app.ui.theme.CarpoolrColors
 import com.kyant.backdrop.Backdrop
+import com.carpoolr.app.connect.Provider
+import com.kyant.shapes.Capsule
 import com.kyant.shapes.RoundedRectangle
 
 /**
@@ -125,7 +127,11 @@ private val SupportItems = listOf(
 
 /** Everything that used to live in the menu now lives here. */
 @Composable
-fun ProfileContent(onClose: () -> Unit) {
+fun ProfileContent(
+    onClose: () -> Unit,
+    isConnected: (Provider) -> Boolean,
+    onConnect: (Provider) -> Unit
+) {
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
@@ -148,20 +154,78 @@ fun ProfileContent(onClose: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             var i = 0
-            listOf(AccountItems, SafetyItems, SupportItems).forEachIndexed { group, items ->
-                if (group > 0) {
-                    Box(
-                        Modifier
-                            .padding(vertical = 8.dp, horizontal = 12.dp)
-                            .fillMaxWidth()
-                            .height(1.dp)
-                            .background(CarpoolrColors.Cream.copy(alpha = 0.10f))
-                    )
-                }
-                items.forEach { item ->
-                    DrawerRow(item, Modifier.staggeredEntrance(i++, 32L))
-                }
+            AccountItems.forEach { DrawerRow(it, Modifier.staggeredEntrance(i++, 32L)) }
+
+            SectionLabel("connections", Modifier.staggeredEntrance(i++, 32L))
+            Provider.entries.forEach { p ->
+                ConnectionRow(p, isConnected(p), { onConnect(p) }, Modifier.staggeredEntrance(i++, 32L))
             }
+
+            Divider()
+            SafetyItems.forEach { DrawerRow(it, Modifier.staggeredEntrance(i++, 32L)) }
+            Divider()
+            SupportItems.forEach { DrawerRow(it, Modifier.staggeredEntrance(i++, 32L)) }
+        }
+    }
+}
+
+@Composable
+private fun Divider() {
+    Box(
+        Modifier
+            .padding(vertical = 8.dp, horizontal = 12.dp)
+            .fillMaxWidth()
+            .height(1.dp)
+            .background(CarpoolrColors.Cream.copy(alpha = 0.10f))
+    )
+}
+
+@Composable
+private fun SectionLabel(text: String, modifier: Modifier = Modifier) {
+    BasicText(
+        text,
+        style = TextStyle(CarpoolrColors.CreamMuted, 13.sp, fontWeight = FontWeight.Medium),
+        modifier = modifier.padding(start = 12.dp, top = 18.dp, bottom = 4.dp)
+    )
+}
+
+/** A ride app link. uber/ola sign in on the web; rapido can only be opened. */
+@Composable
+private fun ConnectionRow(p: Provider, connected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val source = remember { MutableInteractionSource() }
+    Row(
+        modifier
+            .fillMaxWidth()
+            .pressScale(source, 0.97f)
+            .clip(RoundedRectangle(18.dp))
+            .clickable(interactionSource = source, indication = null, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        GlassIcon(R.drawable.ic_link, null, size = 22, tint = CarpoolrColors.CreamMuted)
+        Spacer(Modifier.width(14.dp))
+        BasicText(
+            p.label,
+            style = TextStyle(CarpoolrColors.Cream, 16.sp, fontWeight = FontWeight.Medium),
+            modifier = Modifier.weight(1f)
+        )
+        when {
+            !p.signsInOnWeb -> {
+                BasicText("open app", style = TextStyle(CarpoolrColors.CreamMuted, 13.sp))
+                Spacer(Modifier.width(6.dp))
+                GlassIcon(R.drawable.ic_external, null, size = 16, tint = CarpoolrColors.CreamMuted)
+            }
+            connected -> {
+                BasicText("connected", style = TextStyle(CarpoolrColors.Cream, 13.sp))
+                Spacer(Modifier.width(6.dp))
+                GlassIcon(R.drawable.ic_check, null, size = 16, tint = CarpoolrColors.Raspberry)
+            }
+            else -> Box(
+                Modifier
+                    .clip(Capsule())
+                    .background(CarpoolrColors.Raspberry)
+                    .padding(horizontal = 12.dp, vertical = 5.dp)
+            ) { BasicText("connect", style = TextStyle(Color.White, 13.sp, fontWeight = FontWeight.Bold)) }
         }
     }
 }

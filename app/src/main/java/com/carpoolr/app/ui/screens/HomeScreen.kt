@@ -64,7 +64,7 @@ fun HomeScreen(cardBackdrop: Backdrop, contentPadding: PaddingValues) {
                     RouteField(label = "pickup", placeholder = "current location", value = null, dotFilled = true)
                     RouteField(label = "drop", placeholder = "enter destination", value = null, dotFilled = false)
                     Spacer(Modifier.height(4.dp))
-                    PrimaryPill("pool me now")
+                    PrimaryPill("find a pool")
                 }
             }
         }

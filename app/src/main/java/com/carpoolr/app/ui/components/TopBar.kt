@@ -46,13 +46,13 @@ fun CarpoolrTopBar(
             modifier = Modifier.align(Alignment.Center),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Two-colour mark (cream route, raspberry centre ring), cropped tight so it reads big.
             Image(
-                painter = painterResource(R.drawable.ic_route_mark),
+                painter = painterResource(R.drawable.ic_route_mark_color),
                 contentDescription = null,
-                colorFilter = ColorFilter.tint(CarpoolrColors.Raspberry),
-                modifier = Modifier.size(34.dp)
+                modifier = Modifier.size(width = 45.dp, height = 28.dp)
             )
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(8.dp))
             BasicText(
                 "carpoolr",
                 style = TextStyle(
