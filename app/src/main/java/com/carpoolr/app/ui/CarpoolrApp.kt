@@ -43,7 +43,9 @@ import kotlinx.coroutines.launch
 import com.carpoolr.app.connect.Provider
 import com.carpoolr.app.connect.openProviderApp
 import com.carpoolr.app.ui.screens.HomeScreen
-import com.carpoolr.app.ui.screens.WebLoginScreen
+import com.carpoolr.app.connect.WebLoginActivity
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
 import com.carpoolr.app.ui.screens.PlaceholderScreen
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
@@ -52,11 +54,20 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 fun CarpoolrApp() {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var profileOpen by rememberSaveable { mutableStateOf(false) }
-    var signingInTo by rememberSaveable { mutableStateOf<String?>(null) }
     var connectionsVersion by remember { mutableIntStateOf(0) }
     val view = LocalView.current
     val context = LocalContext.current
     val connections = remember { ConnectionStore(context) }
+    var pendingProvider by rememberSaveable { mutableStateOf<String?>(null) }
+    val webLogin = rememberLauncherForActivityResult(WebLoginActivity.Contract()) { done ->
+        val p = pendingProvider?.let(Provider::valueOf)
+        pendingProvider = null
+        if (done && p != null) {
+            val ok = connections.markSignedIn(p)
+            connectionsVersion++
+            if (!ok) Toast.makeText(context, "${p.label} doesn't look signed in yet", Toast.LENGTH_SHORT).show()
+        }
+    }
     val scope = rememberCoroutineScope()
 
     // backgroundBackdrop: only the green field, sampled by glass cards inside the content.
@@ -139,7 +150,7 @@ fun CarpoolrApp() {
                 },
                 onConnect = { p ->
                     view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    if (p.signsInOnWeb) signingInTo = p.name else openProviderApp(context, p)
+                    if (p.signsInOnWeb) { pendingProvider = p.name; webLogin.launch(p) } else openProviderApp(context, p)
                 },
                 onSignOut = {
                     profileOpen = false
@@ -148,17 +159,5 @@ fun CarpoolrApp() {
             )
         }
 
-        signingInTo?.let { name ->
-            val provider = Provider.valueOf(name)
-            WebLoginScreen(
-                provider = provider,
-                onDone = {
-                    connections.markSignedIn(provider)
-                    connectionsVersion++
-                    signingInTo = null
-                },
-                onCancel = { signingInTo = null }
-            )
-        }
     }
 }

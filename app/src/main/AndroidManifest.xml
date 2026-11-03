@@ -36,6 +36,12 @@
                 <data android:scheme="carpoolr" android:host="auth" />
             </intent-filter>
         </activity>
+        <!-- Ride-app sign-in, full screen and outside the glass layers -->
+        <activity
+            android:name=".connect.WebLoginActivity"
+            android:exported="false"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize" />
     </application>
 
 </manifest>
