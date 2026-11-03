@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -60,5 +61,9 @@ dependencies {
     implementation(libs.androidx.compose.ui.text)
     implementation(libs.kyant.backdrop)
     implementation(libs.kyant.shapes)
+    implementation(platform(libs.supabase.bom))
+    implementation(libs.supabase.auth)
+    implementation(libs.supabase.postgrest)
+    implementation(libs.ktor.client.okhttp)
     testImplementation(libs.junit)
 }

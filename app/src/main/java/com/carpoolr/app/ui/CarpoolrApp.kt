@@ -22,6 +22,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -37,6 +38,8 @@ import com.carpoolr.app.ui.components.ProfileContent
 import com.carpoolr.app.ui.components.SideSheet
 import com.carpoolr.app.ui.components.Tab
 import com.carpoolr.app.connect.ConnectionStore
+import com.carpoolr.app.data.Backend
+import kotlinx.coroutines.launch
 import com.carpoolr.app.connect.Provider
 import com.carpoolr.app.connect.openProviderApp
 import com.carpoolr.app.ui.screens.HomeScreen
@@ -54,6 +57,7 @@ fun CarpoolrApp() {
     val view = LocalView.current
     val context = LocalContext.current
     val connections = remember { ConnectionStore(context) }
+    val scope = rememberCoroutineScope()
 
     // backgroundBackdrop: only the green field, sampled by glass cards inside the content.
     // contentBackdrop: everything on screen, sampled by the floating top bar, tab bar and sheets.
@@ -136,6 +140,10 @@ fun CarpoolrApp() {
                 onConnect = { p ->
                     view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                     if (p.signsInOnWeb) signingInTo = p.name else openProviderApp(context, p)
+                },
+                onSignOut = {
+                    profileOpen = false
+                    scope.launch { runCatching { Backend.signOut() } }
                 }
             )
         }

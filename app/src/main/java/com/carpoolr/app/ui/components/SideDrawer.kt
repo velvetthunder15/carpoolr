@@ -130,7 +130,8 @@ private val SupportItems = listOf(
 fun ProfileContent(
     onClose: () -> Unit,
     isConnected: (Provider) -> Boolean,
-    onConnect: (Provider) -> Unit
+    onConnect: (Provider) -> Unit,
+    onSignOut: () -> Unit
 ) {
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -164,7 +165,13 @@ fun ProfileContent(
             Divider()
             SafetyItems.forEach { DrawerRow(it, Modifier.staggeredEntrance(i++, 32L)) }
             Divider()
-            SupportItems.forEach { DrawerRow(it, Modifier.staggeredEntrance(i++, 32L)) }
+            SupportItems.forEach { item ->
+                DrawerRow(
+                    item,
+                    Modifier.staggeredEntrance(i++, 32L),
+                    onClick = if (item.label == "sign out") onSignOut else ({})
+                )
+            }
         }
     }
 }
@@ -244,14 +251,14 @@ private fun CloseButton(onClose: () -> Unit) {
 }
 
 @Composable
-private fun DrawerRow(item: ProfileItem, modifier: Modifier = Modifier) {
+private fun DrawerRow(item: ProfileItem, modifier: Modifier = Modifier, onClick: () -> Unit = {}) {
     val source = remember { MutableInteractionSource() }
     Row(
         modifier
             .fillMaxWidth()
             .pressScale(source, 0.97f)
             .clip(RoundedRectangle(18.dp))
-            .clickable(interactionSource = source, indication = null, onClick = {})
+            .clickable(interactionSource = source, indication = null, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 13.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

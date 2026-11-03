@@ -1,12 +1,25 @@
 package com.carpoolr.app
 
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
+import com.carpoolr.app.data.Backend
 import com.carpoolr.app.ui.CarpoolrApp
+import com.carpoolr.app.ui.screens.SignInScreen
+import com.carpoolr.app.ui.theme.CarpoolrColors
+import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.handleDeeplinks
+import io.github.jan.supabase.auth.status.SessionStatus
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -15,6 +28,19 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
         )
         super.onCreate(savedInstanceState)
-        setContent { CarpoolrApp() }
+        Backend.client.handleDeeplinks(intent)
+        setContent {
+            val status by Backend.client.auth.sessionStatus.collectAsState()
+            when (status) {
+                is SessionStatus.Authenticated -> CarpoolrApp()
+                is SessionStatus.Initializing -> Box(Modifier.fillMaxSize().background(CarpoolrColors.Green))
+                else -> SignInScreen()
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        Backend.client.handleDeeplinks(intent)
     }
 }
