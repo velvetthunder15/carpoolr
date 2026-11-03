@@ -84,10 +84,28 @@ fun SignInScreen() {
                 scope.launch {
                     runCatching { Backend.sendCode(email) }
                         .onSuccess { codeSent = true; error = null }
-                        .onFailure { error = "couldn't send the code. try again in a minute." }
+                        .onFailure { e ->
+                            val msg = e.message.orEmpty()
+                            if (msg.contains("seconds", true) || msg.contains("rate", true)) {
+                                // a code was sent moments ago; it still works, so go straight to the code field
+                                codeSent = true
+                                error = "a code was just sent. use the newest one in your inbox."
+                            } else {
+                                error = "couldn't send the code: " + msg.lineSequence().firstOrNull().orEmpty().take(120).lowercase()
+                            }
+                        }
                     busy = false
                 }
             }
+            Spacer(Modifier.height(14.dp))
+            BasicText(
+                "i already have a code",
+                style = TextStyle(CarpoolrColors.CreamMuted, 14.sp),
+                modifier = Modifier.clickable {
+                    if (Patterns.EMAIL_ADDRESS.matcher(email).matches()) { codeSent = true; error = null }
+                    else error = "enter your email first"
+                }
+            )
         } else {
             BasicText("code sent to $email", style = TextStyle(CarpoolrColors.CreamMuted, 14.sp))
             Spacer(Modifier.height(10.dp))
@@ -97,7 +115,7 @@ fun SignInScreen() {
                 busy = true
                 scope.launch {
                     runCatching { Backend.verifyCode(email, code) }
-                        .onFailure { error = "wrong or expired code" }
+                        .onFailure { e -> error = if (e.message.orEmpty().contains("expired", true) || e.message.orEmpty().contains("invalid", true)) "wrong or expired code" else "couldn't sign in: " + e.message.orEmpty().lineSequence().firstOrNull().orEmpty().take(120).lowercase() }
                     busy = false
                 }
             }
