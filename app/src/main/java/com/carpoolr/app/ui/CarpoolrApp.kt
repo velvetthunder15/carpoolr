@@ -31,7 +31,6 @@ import androidx.compose.ui.unit.dp
 import com.carpoolr.app.ui.components.CarpoolrBackground
 import com.carpoolr.app.ui.components.CarpoolrBottomBar
 import com.carpoolr.app.ui.components.CarpoolrTopBar
-import com.carpoolr.app.ui.components.MenuContent
 import com.carpoolr.app.ui.components.ProfileContent
 import com.carpoolr.app.ui.components.SideSheet
 import com.carpoolr.app.ui.components.Tab
@@ -43,7 +42,6 @@ import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 @Composable
 fun CarpoolrApp() {
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    var menuOpen by rememberSaveable { mutableStateOf(false) }
     var profileOpen by rememberSaveable { mutableStateOf(false) }
     val view = LocalView.current
 
@@ -78,19 +76,14 @@ fun CarpoolrApp() {
             ) { index ->
                 when (Tab.entries[index]) {
                     Tab.Home -> HomeScreen(backgroundBackdrop, contentPadding)
-                    Tab.Find -> PlaceholderScreen(
-                        "Find a pool",
-                        "Search routes that overlap yours and leave within 15 minutes.",
-                        contentPadding
-                    )
                     Tab.Rides -> PlaceholderScreen(
-                        "No rides yet",
-                        "Pools you join or start will show up here.",
+                        "no rides yet",
+                        "pools you join will show up here.",
                         contentPadding
                     )
                     Tab.Chats -> PlaceholderScreen(
-                        "Quiet in here",
-                        "Chat with your pool once you're matched.",
+                        "quiet in here",
+                        "chat with your pool once you're matched.",
                         contentPadding
                     )
                 }
@@ -99,10 +92,6 @@ fun CarpoolrApp() {
 
         CarpoolrTopBar(
             backdrop = contentBackdrop,
-            onMenu = {
-                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                menuOpen = true
-            },
             onProfile = {
                 view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                 profileOpen = true
@@ -121,13 +110,6 @@ fun CarpoolrApp() {
             },
             modifier = Modifier.align(Alignment.BottomCenter)
         )
-
-        SideSheet(
-            visible = menuOpen,
-            fromStart = true,
-            backdrop = contentBackdrop,
-            onDismiss = { menuOpen = false }
-        ) { MenuContent(onClose = { menuOpen = false }) }
 
         SideSheet(
             visible = profileOpen,

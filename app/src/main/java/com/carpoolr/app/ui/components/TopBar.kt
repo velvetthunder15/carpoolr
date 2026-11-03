@@ -2,6 +2,8 @@ package com.carpoolr.app.ui.components
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -12,6 +14,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
@@ -25,11 +28,10 @@ import com.kyant.backdrop.Backdrop
 
 private val GlassSurface = CarpoolrColors.GreenDeep.copy(alpha = 0.35f)
 
-/** Menu (left) · carpoolr tag (centre) · profile (right), all liquid glass. */
+/** Route-mark + carpoolr headline (centre, no glass) · profile (right, glass). */
 @Composable
 fun CarpoolrTopBar(
     backdrop: Backdrop,
-    onMenu: () -> Unit,
     onProfile: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -40,31 +42,23 @@ fun CarpoolrTopBar(
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .height(52.dp)
     ) {
-        LiquidButton(
-            onClick = onMenu,
-            backdrop = backdrop,
-            surfaceColor = GlassSurface,
-            height = 52.dp,
-            horizontalPadding = 0.dp,
-            modifier = Modifier.align(Alignment.CenterStart).width(52.dp)
+        Row(
+            modifier = Modifier.align(Alignment.Center),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            GlassIcon(R.drawable.ic_menu, "Menu")
-        }
-
-        LiquidButton(
-            onClick = {},
-            backdrop = backdrop,
-            surfaceColor = GlassSurface,
-            height = 44.dp,
-            horizontalPadding = 22.dp,
-            modifier = Modifier.align(Alignment.Center)
-        ) {
+            Image(
+                painter = painterResource(R.drawable.ic_route_mark),
+                contentDescription = null,
+                colorFilter = ColorFilter.tint(CarpoolrColors.Raspberry),
+                modifier = Modifier.size(34.dp)
+            )
+            Spacer(Modifier.width(4.dp))
             BasicText(
                 "carpoolr",
                 style = TextStyle(
                     color = CarpoolrColors.Cream,
                     fontFamily = Anton,
-                    fontSize = 24.sp,
+                    fontSize = 26.sp,
                     letterSpacing = 0.5.sp
                 )
             )
@@ -78,17 +72,23 @@ fun CarpoolrTopBar(
             horizontalPadding = 0.dp,
             modifier = Modifier.align(Alignment.CenterEnd).width(52.dp)
         ) {
-            GlassIcon(R.drawable.ic_person, "Profile")
+            GlassIcon(R.drawable.ic_person, "profile")
         }
     }
 }
 
 @Composable
-fun GlassIcon(res: Int, description: String?, modifier: Modifier = Modifier, size: Int = 24) {
+fun GlassIcon(
+    res: Int,
+    description: String?,
+    modifier: Modifier = Modifier,
+    size: Int = 24,
+    tint: Color = CarpoolrColors.Cream
+) {
     Image(
         painter = painterResource(res),
         contentDescription = description,
-        colorFilter = ColorFilter.tint(CarpoolrColors.Cream),
+        colorFilter = ColorFilter.tint(tint),
         modifier = modifier.size(size.dp)
     )
 }

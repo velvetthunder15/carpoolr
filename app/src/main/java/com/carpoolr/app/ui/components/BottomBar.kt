@@ -19,11 +19,11 @@ import com.carpoolr.app.ui.glass.LiquidBottomTabs
 import com.carpoolr.app.ui.theme.CarpoolrColors
 import com.kyant.backdrop.Backdrop
 
+/** Every tab icon is a 24dp Lucide line icon, so all tabs read at the same size. */
 enum class Tab(val label: String, val icon: Int) {
-    Home("Home", R.drawable.ic_home),
-    Find("Find", R.drawable.ic_search),
-    Rides("Rides", R.drawable.ic_route_mark),
-    Chats("Chats", R.drawable.ic_chat)
+    Home("home", R.drawable.ic_home),
+    Rides("rides", R.drawable.ic_car),
+    Chats("chats", R.drawable.ic_chat)
 }
 
 /** The floating liquid-glass icon bar, bottom-centre. Drag the pill or tap a tab. */
@@ -44,7 +44,7 @@ fun CarpoolrBottomBar(
         containerColor = CarpoolrColors.GreenDeep.copy(alpha = 0.40f),
         modifier = modifier
             .navigationBarsPadding()
-            .padding(start = 28.dp, end = 28.dp, bottom = 12.dp)
+            .padding(start = 56.dp, end = 56.dp, bottom = 12.dp)
     ) {
         tabs.forEachIndexed { index, tab ->
             LiquidBottomTab({ onSelect(index) }) {

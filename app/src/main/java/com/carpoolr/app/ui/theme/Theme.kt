@@ -14,6 +14,9 @@ object CarpoolrColors {
     val Cream = Color(0xFFEFEEE0)
     val CreamMuted = Color(0xB3EFEEE0)
     val CreamFaint = Color(0x66EFEEE0)
+
+    /** PANTONE 18-1754 TCX Raspberry: the route mark and the brand accent. */
+    val Raspberry = Color(0xFFD32E5E)
 }
 
 val Anton = FontFamily(Font(R.font.anton))

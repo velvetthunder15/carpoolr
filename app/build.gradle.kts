@@ -60,4 +60,5 @@ dependencies {
     implementation(libs.androidx.compose.ui.text)
     implementation(libs.kyant.backdrop)
     implementation(libs.kyant.shapes)
+    testImplementation(libs.junit)
 }

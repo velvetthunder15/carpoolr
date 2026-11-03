@@ -58,11 +58,11 @@ fun PlaceholderScreen(title: String, subtitle: String, contentPadding: PaddingVa
             val partial = Path()
             measure.getSegment(0f, measure.length * draw.value, partial, true)
             val lw = s * 0.133f
-            drawPath(partial, CarpoolrColors.Cream, style = Stroke(width = lw, cap = StrokeCap.Round))
+            drawPath(partial, CarpoolrColors.Raspberry, style = Stroke(width = lw, cap = StrokeCap.Round))
             val k = pop.value
-            drawCircle(CarpoolrColors.Cream, s * 0.188f * k, a)
-            drawCircle(CarpoolrColors.Cream, s * 0.188f * k, b)
-            drawCircle(CarpoolrColors.Cream, s * 0.212f * k, m)
+            drawCircle(CarpoolrColors.Raspberry, s * 0.188f * k, a)
+            drawCircle(CarpoolrColors.Raspberry, s * 0.188f * k, b)
+            drawCircle(CarpoolrColors.Raspberry, s * 0.212f * k, m)
             drawCircle(CarpoolrColors.Green, s * 0.109f * k, m)
         }
         BasicText(

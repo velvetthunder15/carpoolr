@@ -18,6 +18,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -37,10 +40,8 @@ import com.carpoolr.app.ui.theme.CarpoolrColors
 import com.kyant.backdrop.Backdrop
 import com.kyant.shapes.RoundedRectangle
 
-private val DrawerItems = listOf("My pools", "Saved places", "Payments", "Safety", "Settings", "Help")
-
 /**
- * Glass panel that springs in from the left (menu) or right (profile).
+ * Glass panel that springs in from the right (profile) or the left.
  * Always composed so it can animate out; it does nothing while hidden.
  */
 @Composable
@@ -100,48 +101,66 @@ fun SideSheet(
     }
 }
 
-@Composable
-fun MenuContent(onClose: () -> Unit) {
-    Column(Modifier.fillMaxSize()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            BasicText("carpoolr", style = TextStyle(CarpoolrColors.Cream, 30.sp, fontFamily = Anton))
-            Spacer(Modifier.weight(1f))
-            CloseButton(onClose)
-        }
-        Spacer(Modifier.height(28.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            DrawerItems.forEachIndexed { i, label ->
-                DrawerRow(label, Modifier.staggeredEntrance(i, 40L))
-            }
-        }
-    }
-}
+private data class ProfileItem(val label: String, val icon: Int)
 
+private val AccountItems = listOf(
+    ProfileItem("edit profile", R.drawable.ic_person),
+    ProfileItem("ride history", R.drawable.ic_history),
+    ProfileItem("saved places", R.drawable.ic_pin),
+    ProfileItem("payments", R.drawable.ic_wallet)
+)
+
+private val SafetyItems = listOf(
+    ProfileItem("trusted contacts", R.drawable.ic_users),
+    ProfileItem("safety", R.drawable.ic_shield),
+    ProfileItem("notifications", R.drawable.ic_bell),
+    ProfileItem("settings", R.drawable.ic_settings)
+)
+
+private val SupportItems = listOf(
+    ProfileItem("help", R.drawable.ic_help),
+    ProfileItem("about", R.drawable.ic_info),
+    ProfileItem("sign out", R.drawable.ic_logout)
+)
+
+/** Everything that used to live in the menu now lives here. */
 @Composable
 fun ProfileContent(onClose: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Spacer(Modifier.weight(1f))
+            Box(
+                Modifier
+                    .clip(RoundedRectangle(28.dp))
+                    .background(CarpoolrColors.Cream.copy(alpha = 0.14f))
+                    .padding(12.dp)
+            ) { GlassIcon(R.drawable.ic_person, null, size = 28) }
+            Spacer(Modifier.width(12.dp))
+            BasicText(
+                "your profile",
+                style = TextStyle(CarpoolrColors.Cream, 26.sp, fontFamily = Anton),
+                modifier = Modifier.weight(1f)
+            )
             CloseButton(onClose)
         }
-        Spacer(Modifier.height(12.dp))
-        Box(
-            Modifier
-                .clip(RoundedRectangle(40.dp))
-                .background(CarpoolrColors.Cream.copy(alpha = 0.14f))
-                .padding(18.dp)
-        ) { GlassIcon(R.drawable.ic_person, null, size = 44) }
-        Spacer(Modifier.height(16.dp))
-        BasicText("Your profile", style = TextStyle(CarpoolrColors.Cream, 28.sp, fontFamily = Anton))
-        Spacer(Modifier.height(6.dp))
-        BasicText(
-            "Sign-in and verified college ID come next.",
-            style = TextStyle(CarpoolrColors.CreamMuted, 14.sp)
-        )
-        Spacer(Modifier.height(24.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            listOf("Edit profile", "Ride history", "Trusted contacts").forEachIndexed { i, label ->
-                DrawerRow(label, Modifier.staggeredEntrance(i, 40L))
+        Spacer(Modifier.height(20.dp))
+        Column(
+            Modifier.weight(1f).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            var i = 0
+            listOf(AccountItems, SafetyItems, SupportItems).forEachIndexed { group, items ->
+                if (group > 0) {
+                    Box(
+                        Modifier
+                            .padding(vertical = 8.dp, horizontal = 12.dp)
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(CarpoolrColors.Cream.copy(alpha = 0.10f))
+                    )
+                }
+                items.forEach { item ->
+                    DrawerRow(item, Modifier.staggeredEntrance(i++, 32L))
+                }
             }
         }
     }
@@ -157,21 +176,23 @@ private fun CloseButton(onClose: () -> Unit) {
             .background(CarpoolrColors.Cream.copy(alpha = 0.12f))
             .clickable(interactionSource = source, indication = null, onClick = onClose)
             .padding(8.dp)
-    ) { GlassIcon(R.drawable.ic_close, "Close", size = 20) }
+    ) { GlassIcon(R.drawable.ic_close, "close", size = 20) }
 }
 
 @Composable
-private fun DrawerRow(label: String, modifier: Modifier = Modifier) {
+private fun DrawerRow(item: ProfileItem, modifier: Modifier = Modifier) {
     val source = remember { MutableInteractionSource() }
-    Box(
+    Row(
         modifier
             .fillMaxWidth()
             .pressScale(source, 0.97f)
             .clip(RoundedRectangle(18.dp))
             .clickable(interactionSource = source, indication = null, onClick = {})
-            .padding(horizontal = 12.dp, vertical = 14.dp)
+            .padding(horizontal = 12.dp, vertical = 13.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        BasicText(label, style = TextStyle(CarpoolrColors.Cream, 17.sp, fontWeight = FontWeight.Medium))
+        GlassIcon(item.icon, null, size = 22, tint = CarpoolrColors.CreamMuted)
+        Spacer(Modifier.width(14.dp))
+        BasicText(item.label, style = TextStyle(CarpoolrColors.Cream, 16.sp, fontWeight = FontWeight.Medium))
     }
 }
-

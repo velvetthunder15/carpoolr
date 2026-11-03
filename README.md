@@ -1,10 +1,13 @@
 # Carpoolr
 
-Android app (Kotlin, Jetpack Compose) that pools students on overlapping routes and splits the fare.
+Android app (Kotlin, Jetpack Compose) for instant pooling: people heading the same way at the same time get matched, and the cab fare is split by distance ridden.
 
 ## UI shell
-- Top bar: menu (left), `carpoolr` tag in Anton (centre), profile (right). All three are liquid glass.
-- Bottom: floating liquid-glass icon bar (Home, Find, Rides, Chats). You can drag the pill.
+- Top bar: raspberry route mark + `carpoolr` in Anton (centre, no glass), profile in liquid glass (right). The profile sheet holds all settings.
+- Bottom: floating liquid-glass icon bar (home, rides, chats). You can drag the pill.
+- UI copy is all lowercase; places the user types keep their own casing.
+- Icons: Lucide (ISC), converted to vector drawables, 1.75 stroke.
+- Fare split: `pool/FareSplit.kt`. The fare becomes a per-km rate, and each stretch is split among the riders still on board. Shares are whole rupees that sum to the fare. Unit tested in CI.
 - Liquid glass comes from [Kyant0/AndroidLiquidGlass](https://github.com/Kyant0/AndroidLiquidGlass) `backdrop` 1.0.6: blur, lens refraction and specular highlight. Full refraction runs on Android 13+, with a graceful blur on older versions.
 - Motion uses spring physics everywhere, on render-thread `graphicsLayer` properties only, so it stays at 60fps+:
   - press-scale micro-interactions
