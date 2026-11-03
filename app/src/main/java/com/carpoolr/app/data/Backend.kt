@@ -47,6 +47,14 @@ object Backend {
 
     suspend fun signOut() = client.auth.signOut()
 
+    /** My live trip and everyone pooled with me (empty when I have none). Also retries the match. */
+    suspend fun myPool(): List<PoolRider> =
+        client.postgrest.rpc("my_pool").decodeList<PoolRider>()
+
+    suspend fun leavePool() {
+        client.postgrest.rpc("leave_pool")
+    }
+
     /** Instant match: joins a pool with riders heading the same way right now, or starts searching. */
     suspend fun findPool(
         pickupLat: Double, pickupLng: Double, pickupLabel: String,
@@ -65,4 +73,22 @@ data class PoolMatch(
     @SerialName("request_id") val requestId: String,
     @SerialName("pool_id") val poolId: String? = null,
     val status: String
+)
+
+@Serializable
+data class PoolRider(
+    @SerialName("request_id") val requestId: String,
+    @SerialName("pool_id") val poolId: String? = null,
+    val status: String,
+    @SerialName("expires_at") val expiresAt: String? = null,
+    @SerialName("rider_id") val riderId: String,
+    @SerialName("is_me") val isMe: Boolean,
+    @SerialName("display_name") val displayName: String? = null,
+    @SerialName("pickup_label") val pickupLabel: String,
+    @SerialName("dropoff_label") val dropoffLabel: String,
+    @SerialName("pickup_lat") val pickupLat: Double,
+    @SerialName("pickup_lng") val pickupLng: Double,
+    @SerialName("drop_lat") val dropLat: Double,
+    @SerialName("drop_lng") val dropLng: Double,
+    @SerialName("trip_km") val tripKm: Double
 )
