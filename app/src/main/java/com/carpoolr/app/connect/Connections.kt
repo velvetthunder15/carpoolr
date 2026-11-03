@@ -8,9 +8,9 @@ import android.webkit.CookieManager
 
 /**
  * Ride apps the user links to carpoolr.
- * Uber and Ola sign in on their own mobile sites inside an in-app WebView. Cookies persist,
- * so later fare reads ride on the user's own session.
- * Rapido has no web sign-in, so it only opens the Rapido app.
+ * Uber, Ola and Rapido sign in on their own mobile sites inside an in-app WebView. Cookies
+ * persist, so later fare reads ride on the user's own session.
+ * Rapido's web app (m.rapido.bike) signs in with a phone OTP.
  */
 enum class Provider(
     val label: String,
@@ -20,7 +20,7 @@ enum class Provider(
 ) {
     Uber("uber", "https://m.uber.com/", "https://m.uber.com", "com.ubercab"),
     Ola("ola", "https://book.olacabs.com/", "https://book.olacabs.com", "com.olacabs.customer"),
-    Rapido("rapido", null, null, "com.rapido.passenger");
+    Rapido("rapido", "https://m.rapido.bike/unup-home", "https://m.rapido.bike", "com.rapido.passenger");
 
     val signsInOnWeb: Boolean get() = loginUrl != null
 }
