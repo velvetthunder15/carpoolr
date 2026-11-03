@@ -18,9 +18,11 @@ enum class Provider(
     val cookieUrl: String?,
     val appPackage: String
 ) {
-    Uber("uber", "https://m.uber.com/", "https://m.uber.com", "com.ubercab"),
+    // Uber: login-redirect sends straight to auth.uber.com/v2 (phone/email), then back to m.uber.com.
+    Uber("uber", "https://m.uber.com/go/login-redirect/?previousPathname=%2Fgo%2Fhome", "https://m.uber.com", "com.ubercab"),
     Ola("ola", "https://book.olacabs.com/", "https://book.olacabs.com", "com.olacabs.customer"),
-    Rapido("rapido", "https://m.rapido.bike/unup-home", "https://m.rapido.bike", "com.rapido.passenger");
+    // Rapido PWA's own phone-number login route; it stores {"data": token} in localStorage "token".
+    Rapido("rapido", "https://m.rapido.bike/verify-phonenumber", "https://m.rapido.bike", "com.rapido.passenger");
 
     val signsInOnWeb: Boolean get() = loginUrl != null
 }
@@ -29,6 +31,12 @@ class ConnectionStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("connections", Context.MODE_PRIVATE)
 
     fun isConnected(p: Provider): Boolean = prefs.getBoolean(p.name, false)
+
+    /** Set when the login page itself confirmed a signed-in session. */
+    fun markConnected(p: Provider) {
+        CookieManager.getInstance().flush()
+        prefs.edit().putBoolean(p.name, true).apply()
+    }
 
     /** Called when the user finishes a web sign-in. True only if the site actually set cookies. */
     fun markSignedIn(p: Provider): Boolean {

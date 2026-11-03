@@ -9,7 +9,14 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Message
 import android.view.ViewGroup
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Handler
+import android.os.Looper
 import android.webkit.CookieManager
+import android.webkit.GeolocationPermissions
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
@@ -66,6 +73,28 @@ import androidx.compose.ui.graphics.Color as ComposeColor
 class WebLoginActivity : ComponentActivity() {
 
     private var web: WebView? = null
+    private lateinit var provider: Provider
+    private val main = Handler(Looper.getMainLooper())
+    private var finished = false
+    private var leftLoginPage = false       // uber: reached auth.uber.com at least once
+    private var baseline: Set<String>? = null // ola: session-ish keys present before sign-in
+
+    private var geoCallback: GeolocationPermissions.Callback? = null
+    private var geoOrigin: String? = null
+    private val askLocation = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { res ->
+        val ok = res.values.any { it }
+        geoCallback?.invoke(geoOrigin, ok, false)
+        geoCallback = null
+    }
+
+    /** Polls the page for a signed-in session and closes on its own once it finds one. */
+    private val poll = object : Runnable {
+        override fun run() {
+            if (finished) return
+            web?.let { checkSignedIn(it) }
+            main.postDelayed(this, 1200)
+        }
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -74,7 +103,7 @@ class WebLoginActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
         )
         super.onCreate(savedInstanceState)
-        val provider = Provider.valueOf(intent.getStringExtra(EXTRA_PROVIDER) ?: run { finish(); return })
+        provider = Provider.valueOf(intent.getStringExtra(EXTRA_PROVIDER) ?: run { finish(); return })
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -112,6 +141,7 @@ class WebLoginActivity : ComponentActivity() {
                             .clip(Capsule())
                             .background(CarpoolrColors.Raspberry)
                             .clickable(doneSource, null) {
+                                // manual fallback; the store still checks for real cookies
                                 CookieManager.getInstance().flush()
                                 setResult(Activity.RESULT_OK)
                                 finish()
@@ -143,6 +173,9 @@ class WebLoginActivity : ComponentActivity() {
                 domStorageEnabled = true
                 loadWithOverviewMode = true
                 useWideViewPort = true
+                databaseEnabled = true
+                setGeolocationEnabled(true)
+                mediaPlaybackRequiresUserGesture = false
                 setSupportMultipleWindows(true)
                 javaScriptCanOpenWindowsAutomatically = true
                 // Drop the WebView marker so sites serve their normal mobile sign-in.
@@ -154,9 +187,31 @@ class WebLoginActivity : ComponentActivity() {
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
                     handleUrl(view, request.url)
+
+                override fun onPageFinished(view: WebView, url: String?) {
+                    if (url != null && Uri.parse(url).host == "auth.uber.com") leftLoginPage = true
+                    checkSignedIn(view)
+                }
+
+                override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
+                    // SPA route changes (rapido, ola) don't fire onPageFinished
+                    if (url != null && Uri.parse(url).host == "auth.uber.com") leftLoginPage = true
+                    checkSignedIn(view)
+                }
             }
             webChromeClient = object : WebChromeClient() {
                 override fun onProgressChanged(view: WebView, newProgress: Int) = onProgress(newProgress)
+
+                // Rapido and Uber ask for location; without an answer their pages can sit blank.
+                override fun onGeolocationPermissionsShowPrompt(origin: String, callback: GeolocationPermissions.Callback) {
+                    val granted = ContextCompat.checkSelfPermission(this@WebLoginActivity, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                        ContextCompat.checkSelfPermission(this@WebLoginActivity, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+                    if (granted) callback.invoke(origin, true, false)
+                    else {
+                        geoOrigin = origin; geoCallback = callback
+                        askLocation.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+                    }
+                }
 
                 // Popups (target=_blank, window.open) load in this same page.
                 override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean {
@@ -185,7 +240,42 @@ class WebLoginActivity : ComponentActivity() {
             }
             web = this
             loadUrl(provider.loginUrl ?: "about:blank")
+            main.postDelayed(poll, 2000)
         }
+
+    /** Provider-specific check for a live session; closes the page by itself when signed in. */
+    private fun checkSignedIn(view: WebView) {
+        if (finished) return
+        val host = Uri.parse(view.url ?: return).host ?: return
+        when (provider) {
+            Provider.Uber -> {
+                // auth.uber.com sends you back to m.uber.com only after a successful sign-in
+                if (leftLoginPage && host == "m.uber.com") signedIn()
+            }
+            Provider.Rapido -> if (host == "m.rapido.bike") {
+                view.evaluateJavascript(
+                    "(function(){try{var t=JSON.parse(localStorage.getItem('token')||'null');return !!(t&&t.data)}catch(e){return false}})()"
+                ) { if (it == "true") signedIn() }
+            }
+            Provider.Ola -> if (host.endsWith("olacabs.com")) {
+                view.evaluateJavascript(SESSION_KEYS_JS) { raw ->
+                    val keys = raw.trim('"').split(',').filter { it.isNotBlank() }.toSet()
+                    val before = baseline
+                    if (before == null) baseline = keys
+                    else if ((keys - before).isNotEmpty()) signedIn()
+                }
+            }
+        }
+    }
+
+    private fun signedIn() {
+        if (finished) return
+        finished = true
+        CookieManager.getInstance().flush()
+        ConnectionStore(this).markConnected(provider)
+        setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_AUTO, true))
+        main.postDelayed({ finish() }, 400)
+    }
 
     /** Keeps http(s) in the page; turns intent:// into its web fallback; ignores app-only schemes. */
     private fun handleUrl(view: WebView, uri: Uri, forceLoad: Boolean = false): Boolean {
@@ -203,20 +293,36 @@ class WebLoginActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        finished = true
+        main.removeCallbacksAndMessages(null)
         web?.destroy()
         web = null
         super.onDestroy()
     }
 
-    /** Launch contract: input is the provider, result is true when the user tapped done. */
-    class Contract : ActivityResultContract<Provider, Boolean>() {
+    /** Launch contract: input is the provider; result says how the page closed. */
+    enum class Outcome { Cancelled, TappedDone, SignedIn }
+
+    class Contract : ActivityResultContract<Provider, Outcome>() {
         override fun createIntent(context: Context, input: Provider): Intent =
             Intent(context, WebLoginActivity::class.java).putExtra(EXTRA_PROVIDER, input.name)
 
-        override fun parseResult(resultCode: Int, intent: Intent?): Boolean = resultCode == Activity.RESULT_OK
+        override fun parseResult(resultCode: Int, intent: Intent?): Outcome = when {
+            resultCode != Activity.RESULT_OK -> Outcome.Cancelled
+            intent?.getBooleanExtra(EXTRA_AUTO, false) == true -> Outcome.SignedIn
+            else -> Outcome.TappedDone
+        }
     }
 
     companion object {
         const val EXTRA_PROVIDER = "provider"
+        const val EXTRA_AUTO = "auto"
+
+        /** Names of cookies and storage keys that look like a login session, comma-joined. */
+        private const val SESSION_KEYS_JS =
+            "(function(){var r=/(token|auth|jwt|access)/i,x=/(branch|_ga|gtm|recaptcha|analytic|clevertap|firebase|ab_|exp)/i,o=[];" +
+            "try{for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);var v=localStorage.getItem(k);if(r.test(k)&&!x.test(k)&&v&&v.length>8)o.push('ls:'+k)}}catch(e){}" +
+            "try{for(var i=0;i<sessionStorage.length;i++){var k=sessionStorage.key(i);var v=sessionStorage.getItem(k);if(r.test(k)&&!x.test(k)&&v&&v.length>8)o.push('ss:'+k)}}catch(e){}" +
+            "document.cookie.split(';').forEach(function(c){var n=c.split('=')[0].trim();if(r.test(n)&&!x.test(n))o.push('ck:'+n)});return o.join(',')})()"
     }
 }

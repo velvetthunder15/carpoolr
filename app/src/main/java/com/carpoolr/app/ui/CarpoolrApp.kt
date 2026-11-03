@@ -59,13 +59,20 @@ fun CarpoolrApp() {
     val context = LocalContext.current
     val connections = remember { ConnectionStore(context) }
     var pendingProvider by rememberSaveable { mutableStateOf<String?>(null) }
-    val webLogin = rememberLauncherForActivityResult(WebLoginActivity.Contract()) { done ->
+    val webLogin = rememberLauncherForActivityResult(WebLoginActivity.Contract()) { outcome ->
         val p = pendingProvider?.let(Provider::valueOf)
         pendingProvider = null
-        if (done && p != null) {
-            val ok = connections.markSignedIn(p)
-            connectionsVersion++
-            if (!ok) Toast.makeText(context, "${p.label} doesn't look signed in yet", Toast.LENGTH_SHORT).show()
+        if (p != null) when (outcome) {
+            WebLoginActivity.Outcome.SignedIn -> {
+                connectionsVersion++
+                Toast.makeText(context, "${p.label} connected", Toast.LENGTH_SHORT).show()
+            }
+            WebLoginActivity.Outcome.TappedDone -> {
+                val ok = connections.markSignedIn(p)
+                connectionsVersion++
+                if (!ok) Toast.makeText(context, "${p.label} doesn't look signed in yet", Toast.LENGTH_SHORT).show()
+            }
+            WebLoginActivity.Outcome.Cancelled -> Unit
         }
     }
     val scope = rememberCoroutineScope()
