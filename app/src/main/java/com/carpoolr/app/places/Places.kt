@@ -31,12 +31,19 @@ data class Place(val name: String, val detail: String, val lat: Double, val lng:
  */
 object Places {
     private val json = Json { ignoreUnknownKeys = true }
+    private const val INDIA_BBOX = "68.0,6.5,97.5,35.7"
+
+    /** Last device position (lat, lng), set by [DeviceLocation]. */
+    @Volatile var lastFix: Pair<Double, Double>? = null
 
     suspend fun search(query: String, near: Place?): List<Place> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
         val q = URLEncoder.encode(query.trim(), "UTF-8")
-        val bias = near?.let { "&lat=${it.lat}&lon=${it.lng}" } ?: ""
-        parse(get("https://photon.komoot.io/api/?q=$q&limit=8&lang=en$bias"))
+        // Bias hard toward the rider (pickup, else the last device fix) and keep results in India.
+        val lat = near?.lat ?: lastFix?.first
+        val lng = near?.lng ?: lastFix?.second
+        val bias = if (lat != null && lng != null) "&lat=$lat&lon=$lng&location_bias_scale=0.1&zoom=12" else ""
+        parse(get("https://photon.komoot.io/api/?q=$q&limit=8&lang=en&bbox=$INDIA_BBOX$bias"))
     }
 
     suspend fun reverse(lat: Double, lng: Double): Place? = withContext(Dispatchers.IO) {
@@ -83,6 +90,7 @@ object DeviceLocation {
             .filter { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) }
         val last = providers.mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
             .maxByOrNull { it.time }
+        if (last != null) Places.lastFix = last.latitude to last.longitude
         if (last != null && System.currentTimeMillis() - last.time < 2 * 60_000) return last
         val provider = when {
             LocationManager.NETWORK_PROVIDER in providers -> LocationManager.NETWORK_PROVIDER
@@ -99,6 +107,6 @@ object DeviceLocation {
                 }
             }
         }
-        return fresh ?: last
+        return (fresh ?: last)?.also { Places.lastFix = it.latitude to it.longitude }
     }
 }
