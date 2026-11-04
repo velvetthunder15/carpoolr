@@ -52,6 +52,9 @@ import com.carpoolr.app.places.DeviceLocation
 import com.carpoolr.app.places.Place
 import com.carpoolr.app.places.Places
 import com.carpoolr.app.pool.FareSplit
+import com.carpoolr.app.pool.MatchService
+import com.carpoolr.app.connect.BookActivity
+import com.carpoolr.app.connect.Provider
 import com.carpoolr.app.ui.components.GlassCard
 import com.carpoolr.app.ui.components.pressScale
 import com.carpoolr.app.ui.components.staggeredEntrance
@@ -100,6 +103,18 @@ fun HomeScreen(cardBackdrop: Backdrop, contentPadding: PaddingValues) {
         if (res.values.any { it }) scope.launch { locate() } else error = "no location access. tap pickup to search"
     }
 
+    val book = rememberLauncherForActivityResult(BookActivity.Contract()) { res ->
+        if (res != null) {
+            busy = true
+            scope.launch {
+                runCatching { Backend.setBooking(res.fare, res.provider.label) }.onFailure { e -> toast(context, e) }
+                trip = runCatching { Backend.myPool() }.getOrDefault(emptyList())
+                busy = false
+            }
+        }
+    }
+    val askNotify = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     // restore a live trip, and fill pickup from location
     LaunchedEffect(Unit) {
         trip = runCatching { Backend.myPool() }.getOrDefault(emptyList())
@@ -139,14 +154,24 @@ fun HomeScreen(cardBackdrop: Backdrop, contentPadding: PaddingValues) {
         val riders = trip
         if (riders != null && riders.isNotEmpty()) {
             item {
-                PoolCard(cardBackdrop, riders, busy) {
+                fun act(block: suspend () -> Unit) {
                     busy = true
                     scope.launch {
-                        runCatching { Backend.leavePool() }
+                        runCatching { block() }.onFailure { e -> toast(context, e) }
                         trip = runCatching { Backend.myPool() }.getOrDefault(emptyList())
                         busy = false
                     }
                 }
+                PoolCard(
+                    cardBackdrop, riders, busy,
+                    onLeave = { MatchService.stop(context); act { Backend.leavePool() } },
+                    onBook = { p ->
+                        val me = riders.first { it.isMe }
+                        book.launch(BookActivity.Input(p, me.pickupLat, me.pickupLng, me.pickupLabel, me.dropLat, me.dropLng, me.dropoffLabel))
+                    },
+                    onPaid = { act { Backend.markPaid() } },
+                    onFinish = { act { Backend.finishPool() } }
+                )
             }
             return@LazyColumn
         }
@@ -175,7 +200,13 @@ fun HomeScreen(cardBackdrop: Backdrop, contentPadding: PaddingValues) {
                         busy = true; error = null
                         scope.launch {
                             runCatching { Backend.findPool(p.lat, p.lng, p.name, d.lat, d.lng, d.name) }
-                                .onSuccess { trip = runCatching { Backend.myPool() }.getOrDefault(emptyList()) }
+                                .onSuccess { m ->
+                                    trip = runCatching { Backend.myPool() }.getOrDefault(emptyList())
+                                    if (m.status == "searching") {
+                                        if (android.os.Build.VERSION.SDK_INT >= 33) askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                        MatchService.start(context)
+                                    }
+                                }
                                 .onFailure { e -> error = "couldn't start: " + (e.message?.lineSequence()?.firstOrNull() ?: "").take(100).lowercase() }
                             busy = false
                         }
@@ -189,20 +220,31 @@ fun HomeScreen(cardBackdrop: Backdrop, contentPadding: PaddingValues) {
     }
 }
 
-/** Searching or pooled: who's in, where they're headed, and each share of the fare by distance. */
+/** Searching, pooled, booked: who's in, who books, the fare, and each rider's share by distance. */
 @Composable
-private fun PoolCard(backdrop: Backdrop, riders: List<PoolRider>, busy: Boolean, onLeave: () -> Unit) {
+private fun PoolCard(
+    backdrop: Backdrop,
+    riders: List<PoolRider>,
+    busy: Boolean,
+    onLeave: () -> Unit,
+    onBook: (Provider) -> Unit,
+    onPaid: () -> Unit,
+    onFinish: () -> Unit
+) {
+    val context = LocalContext.current
     val first = riders.first()
     val pooled = first.status == "matched" && riders.size > 1
+    val booked = first.poolStatus == "booked" && first.fareRupees != null
+    val me = riders.firstOrNull { it.isMe } ?: first
+    val booker = riders.firstOrNull { it.isBooker }
+    val legs = remember(riders) { riders.map { FareSplit.Leg(it.riderId, it.boardKm, it.alightKm) } }
     val shares = remember(riders) {
-        if (!pooled) emptyMap() else runCatching {
-            FareSplit.split(100, riders.map { FareSplit.Rider(it.riderId, it.tripKm.coerceAtLeast(0.1)) })
-        }.getOrDefault(emptyMap())
+        if (!pooled) emptyMap() else runCatching { FareSplit.splitLegs(first.fareRupees ?: 100, legs) }.getOrDefault(emptyMap())
     }
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        AnimatedContent(pooled, label = "poolTitle") { isPooled ->
+        AnimatedContent(Triple(pooled, booked, 0), label = "poolTitle") { (isPooled, isBooked, _) ->
             BasicText(
-                if (isPooled) "you're pooled" else "finding your pool",
+                when { isBooked -> "ride booked"; isPooled -> "you're pooled"; else -> "finding your pool" },
                 style = TextStyle(CarpoolrColors.Cream, 44.sp, fontFamily = Anton),
                 modifier = Modifier.padding(horizontal = 4.dp)
             )
@@ -213,19 +255,53 @@ private fun PoolCard(backdrop: Backdrop, riders: List<PoolRider>, busy: Boolean,
                     var left by remember { mutableStateOf(minutesLeft(first.expiresAt)) }
                     LaunchedEffect(first.expiresAt) { while (true) { left = minutesLeft(first.expiresAt); delay(15_000) } }
                     BasicText(
-                        "looking for riders heading your way" + (left?.let { " · $it min left" } ?: ""),
+                        "looking for riders heading your way" + (left?.let { " · $it min left" } ?: "") +
+                            ". we'll notify you when you're pooled.",
                         style = TextStyle(CarpoolrColors.CreamMuted, 14.sp)
                     )
                 }
-                riders.forEach { r ->
-                    RiderRow(r, shares[r.riderId])
-                }
-                if (pooled) BasicText(
-                    "split by distance: whoever gets off first pays only for their stretch.",
+                if (booked) BasicText(
+                    "₹${first.fareRupees} on ${first.provider ?: "the ride app"}, booked by ${if (booker?.isMe == true) "you" else booker?.displayName ?: "the booker"}",
+                    style = TextStyle(CarpoolrColors.Cream, 15.sp, fontWeight = FontWeight.Medium)
+                )
+                riders.forEach { r -> RiderRow(r, shares[r.riderId], booked) }
+                if (pooled && !booked) BasicText(
+                    "shares are by distance ridden. rupees appear once the cab is booked.",
                     style = TextStyle(CarpoolrColors.CreamMuted, 13.sp)
                 )
                 Spacer(Modifier.height(2.dp))
-                PrimaryPill(
+
+                when {
+                    // the farthest rider books; their route covers everyone
+                    pooled && !booked && me.isBooker -> {
+                        BasicText("you ride farthest, so you book. pick the app:", style = TextStyle(CarpoolrColors.CreamMuted, 13.sp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Provider.entries.forEach { p ->
+                                Box(
+                                    Modifier.weight(1f).clip(Capsule()).background(CarpoolrColors.Raspberry)
+                                        .clickable(enabled = !busy) { onBook(p) }.padding(vertical = 12.dp),
+                                    contentAlignment = Alignment.Center
+                                ) { BasicText(p.label, style = TextStyle(Color.White, 15.sp, fontWeight = FontWeight.Bold)) }
+                            }
+                        }
+                    }
+                    pooled && !booked -> BasicText(
+                        "${booker?.displayName ?: "the farthest rider"} is booking the cab. hang tight.",
+                        style = TextStyle(CarpoolrColors.Cream, 14.sp)
+                    )
+                    booked && !me.isBooker && !me.paid -> {
+                        val owe = shares[me.riderId] ?: 0
+                        val upi = booker?.upiId
+                        PrimaryPill(if (upi != null) "pay ₹$owe to ${booker?.displayName ?: "booker"}" else "${booker?.displayName ?: "booker"} hasn't added a upi id", enabled = upi != null && owe > 0) {
+                            payUpi(context, upi!!, booker?.displayName ?: "carpoolr rider", owe)
+                        }
+                        PrimaryPill("i've paid", enabled = !busy, color = CarpoolrColors.Cream.copy(alpha = 0.14f), onClick = onPaid)
+                    }
+                }
+
+                if (booked) PrimaryPill(if (busy) "ending…" else "end ride", enabled = !busy,
+                    color = CarpoolrColors.Cream.copy(alpha = 0.14f), onClick = onFinish)
+                else PrimaryPill(
                     if (busy) "leaving…" else if (pooled) "leave pool" else "stop searching",
                     enabled = !busy,
                     color = CarpoolrColors.Cream.copy(alpha = 0.14f),
@@ -236,8 +312,19 @@ private fun PoolCard(backdrop: Backdrop, riders: List<PoolRider>, busy: Boolean,
     }
 }
 
+/** Opens the rider's UPI app with the amount filled in. */
+private fun payUpi(context: android.content.Context, vpa: String, name: String, rupees: Int) {
+    val uri = android.net.Uri.Builder().scheme("upi").authority("pay")
+        .appendQueryParameter("pa", vpa).appendQueryParameter("pn", name)
+        .appendQueryParameter("am", "$rupees.00").appendQueryParameter("cu", "INR")
+        .appendQueryParameter("tn", "carpoolr ride share").build()
+    val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, uri)
+    runCatching { context.startActivity(android.content.Intent.createChooser(intent, "pay with")) }
+        .onFailure { android.widget.Toast.makeText(context, "no upi app found", android.widget.Toast.LENGTH_SHORT).show() }
+}
+
 @Composable
-private fun RiderRow(r: PoolRider, sharePct: Int?) {
+private fun RiderRow(r: PoolRider, share: Int?, rupees: Boolean) {
     Row(
         Modifier.fillMaxWidth().clip(RoundedRectangle(18.dp)).background(CarpoolrColors.Cream.copy(alpha = 0.08f))
             .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -256,7 +343,7 @@ private fun RiderRow(r: PoolRider, sharePct: Int?) {
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
             BasicText(
-                if (r.isMe) "you" else (r.displayName ?: "rider"),
+                (if (r.isMe) "you" else (r.displayName ?: "rider")) + (if (r.isBooker && r.status == "matched") " · books" else ""),
                 style = TextStyle(CarpoolrColors.Cream, 16.sp, fontWeight = FontWeight.Medium)
             )
             BasicText(
@@ -268,7 +355,13 @@ private fun RiderRow(r: PoolRider, sharePct: Int?) {
         Spacer(Modifier.width(8.dp))
         Column(horizontalAlignment = Alignment.End) {
             BasicText("${"%.1f".format(r.tripKm)} km", style = TextStyle(CarpoolrColors.Cream, 14.sp, fontWeight = FontWeight.Medium))
-            sharePct?.let { BasicText("$it% of fare", style = TextStyle(CarpoolrColors.CreamMuted, 12.sp)) }
+            share?.let {
+                BasicText(
+                    if (rupees) "₹$it" + (if (r.paid && !r.isBooker) " · paid" else "") else "$it% of fare",
+                    style = TextStyle(if (rupees) CarpoolrColors.Cream else CarpoolrColors.CreamMuted, if (rupees) 14.sp else 12.sp,
+                        fontWeight = if (rupees) FontWeight.Bold else FontWeight.Normal)
+                )
+            }
         }
     }
 }
@@ -413,4 +506,9 @@ private fun PrimaryPill(
     ) {
         BasicText(text, style = TextStyle(Color.White, 16.sp, fontWeight = FontWeight.Bold))
     }
+}
+
+private fun toast(context: android.content.Context, e: Throwable) {
+    val msg = e.message?.lineSequence()?.firstOrNull()?.take(120)?.lowercase() ?: "something went wrong"
+    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
 }

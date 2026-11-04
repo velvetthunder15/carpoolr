@@ -25,6 +25,10 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -106,17 +110,11 @@ fun SideSheet(
 private data class ProfileItem(val label: String, val icon: Int)
 
 private val AccountItems = listOf(
-    ProfileItem("edit profile", R.drawable.ic_person),
-    ProfileItem("ride history", R.drawable.ic_history),
-    ProfileItem("saved places", R.drawable.ic_pin),
-    ProfileItem("payments", R.drawable.ic_wallet)
+    ProfileItem("ride history", R.drawable.ic_history)
 )
 
 private val SafetyItems = listOf(
-    ProfileItem("trusted contacts", R.drawable.ic_users),
-    ProfileItem("safety", R.drawable.ic_shield),
-    ProfileItem("notifications", R.drawable.ic_bell),
-    ProfileItem("settings", R.drawable.ic_settings)
+    ProfileItem("notifications", R.drawable.ic_bell)
 )
 
 private val SupportItems = listOf(
@@ -131,7 +129,11 @@ fun ProfileContent(
     onClose: () -> Unit,
     isConnected: (Provider) -> Boolean,
     onConnect: (Provider) -> Unit,
-    onSignOut: () -> Unit
+    onSignOut: () -> Unit,
+    name: String = "",
+    upi: String = "",
+    onSaveProfile: (String, String) -> Unit = { _, _ -> },
+    onRow: (String) -> Unit = {}
 ) {
     Column(Modifier.fillMaxSize()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -155,7 +157,8 @@ fun ProfileContent(
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             var i = 0
-            AccountItems.forEach { DrawerRow(it, Modifier.staggeredEntrance(i++, 32L)) }
+            ProfileEditor(name, upi, onSaveProfile, Modifier.staggeredEntrance(i++, 32L))
+            AccountItems.forEach { item -> DrawerRow(item, Modifier.staggeredEntrance(i++, 32L)) { onRow(item.label) } }
 
             SectionLabel("connections", Modifier.staggeredEntrance(i++, 32L))
             Provider.entries.forEach { p ->
@@ -163,13 +166,13 @@ fun ProfileContent(
             }
 
             Divider()
-            SafetyItems.forEach { DrawerRow(it, Modifier.staggeredEntrance(i++, 32L)) }
+            SafetyItems.forEach { item -> DrawerRow(item, Modifier.staggeredEntrance(i++, 32L)) { onRow(item.label) } }
             Divider()
             SupportItems.forEach { item ->
                 DrawerRow(
                     item,
                     Modifier.staggeredEntrance(i++, 32L),
-                    onClick = if (item.label == "sign out") onSignOut else ({})
+                    onClick = if (item.label == "sign out") onSignOut else ({ onRow(item.label) })
                 )
             }
         }
@@ -265,5 +268,41 @@ private fun DrawerRow(item: ProfileItem, modifier: Modifier = Modifier, onClick:
         GlassIcon(item.icon, null, size = 22, tint = CarpoolrColors.CreamMuted)
         Spacer(Modifier.width(14.dp))
         BasicText(item.label, style = TextStyle(CarpoolrColors.Cream, 16.sp, fontWeight = FontWeight.Medium))
+    }
+}
+
+/** Name your pool sees, and the UPI id riders pay you back on when you book. */
+@Composable
+private fun ProfileEditor(name: String, upi: String, onSave: (String, String) -> Unit, modifier: Modifier = Modifier) {
+    var n by remember(name) { mutableStateOf(name) }
+    var u by remember(upi) { mutableStateOf(upi) }
+    val dirty = n.trim() != name || u.trim() != upi
+    Column(modifier.fillMaxWidth().padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        EditField("name", "how your pool sees you", n) { n = it.take(30) }
+        EditField("upi id", "you@okaxis, so riders can pay you", u) { u = it.trim().take(60) }
+        if (dirty) Box(
+            Modifier.clip(Capsule()).background(CarpoolrColors.Raspberry)
+                .clickable { onSave(n.trim(), u.trim()) }
+                .padding(horizontal = 18.dp, vertical = 9.dp)
+        ) { BasicText("save", style = TextStyle(Color.White, 15.sp, fontWeight = FontWeight.Bold)) }
+    }
+}
+
+@Composable
+private fun EditField(label: String, hint: String, value: String, onChange: (String) -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedRectangle(16.dp)).background(CarpoolrColors.Cream.copy(alpha = 0.08f))
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+    ) {
+        BasicText(label, style = TextStyle(CarpoolrColors.CreamMuted, 12.sp))
+        Box {
+            if (value.isEmpty()) BasicText(hint, style = TextStyle(CarpoolrColors.CreamFaint, 15.sp))
+            BasicTextField(
+                value, onChange, singleLine = true,
+                textStyle = TextStyle(CarpoolrColors.Cream, 15.sp, fontWeight = FontWeight.Medium),
+                cursorBrush = SolidColor(CarpoolrColors.Raspberry),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
     }
 }

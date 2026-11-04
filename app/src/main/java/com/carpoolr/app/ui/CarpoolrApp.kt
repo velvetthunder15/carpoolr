@@ -46,7 +46,9 @@ import com.carpoolr.app.ui.screens.HomeScreen
 import com.carpoolr.app.connect.WebLoginActivity
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
-import com.carpoolr.app.ui.screens.PlaceholderScreen
+import com.carpoolr.app.ui.screens.RidesScreen
+import com.carpoolr.app.ui.screens.ChatScreen
+import com.carpoolr.app.data.Profile
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 
@@ -76,6 +78,10 @@ fun CarpoolrApp() {
         }
     }
     val scope = rememberCoroutineScope()
+    var profile by remember { mutableStateOf<Profile?>(null) }
+    androidx.compose.runtime.LaunchedEffect(profileOpen) {
+        if (profileOpen || profile == null) runCatching { Backend.myProfile() }.onSuccess { profile = it }
+    }
 
     // backgroundBackdrop: only the green field, sampled by glass cards inside the content.
     // contentBackdrop: everything on screen, sampled by the floating top bar, tab bar and sheets.
@@ -108,16 +114,8 @@ fun CarpoolrApp() {
             ) { index ->
                 when (Tab.entries[index]) {
                     Tab.Home -> HomeScreen(backgroundBackdrop, contentPadding)
-                    Tab.Rides -> PlaceholderScreen(
-                        "no rides yet",
-                        "pools you join will show up here.",
-                        contentPadding
-                    )
-                    Tab.Chats -> PlaceholderScreen(
-                        "quiet in here",
-                        "chat with your pool once you're matched.",
-                        contentPadding
-                    )
+                    Tab.Rides -> RidesScreen(contentPadding)
+                    Tab.Chats -> ChatScreen(contentPadding)
                 }
             }
         }
@@ -162,6 +160,29 @@ fun CarpoolrApp() {
                 onSignOut = {
                     profileOpen = false
                     scope.launch { runCatching { Backend.signOut() } }
+                },
+                name = profile?.displayName ?: "",
+                upi = profile?.upiId ?: "",
+                onSaveProfile = { n, u ->
+                    scope.launch {
+                        runCatching { Backend.updateProfile(n, u) }
+                            .onSuccess { profile = Profile(n.ifBlank { null }, u.ifBlank { null }); Toast.makeText(context, "saved", Toast.LENGTH_SHORT).show() }
+                            .onFailure { Toast.makeText(context, "couldn't save", Toast.LENGTH_SHORT).show() }
+                    }
+                },
+                onRow = { label ->
+                    when (label) {
+                        "ride history" -> { profileOpen = false; tab = Tab.Rides.ordinal }
+                        "notifications" -> runCatching {
+                            context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName))
+                        }
+                        "help" -> runCatching {
+                            context.startActivity(android.content.Intent(android.content.Intent.ACTION_SENDTO,
+                                android.net.Uri.parse("mailto:chiragrasane15@gmail.com?subject=carpoolr%20help")))
+                        }
+                        "about" -> Toast.makeText(context, "carpoolr beta", Toast.LENGTH_SHORT).show()
+                    }
                 }
             )
         }

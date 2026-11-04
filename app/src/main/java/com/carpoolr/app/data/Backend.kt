@@ -7,6 +7,9 @@ import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.OTP
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
+import io.github.jan.supabase.functions.Functions
+import io.github.jan.supabase.functions.functions
+import io.ktor.client.statement.bodyAsText
 import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -30,6 +33,7 @@ object Backend {
                 host = "auth"
             }
             install(Postgrest)
+            install(Functions)
         }
     }
 
@@ -53,6 +57,39 @@ object Backend {
 
     suspend fun leavePool() {
         client.postgrest.rpc("leave_pool")
+    }
+
+    /** Booker only: the fare the ride app charged, which locks the pool. */
+    suspend fun setBooking(fareRupees: Int, provider: String) {
+        client.postgrest.rpc("set_booking", buildJsonObject { put("p_fare", fareRupees); put("p_provider", provider) })
+    }
+
+    suspend fun markPaid() { client.postgrest.rpc("mark_paid") }
+    suspend fun finishPool() { client.postgrest.rpc("finish_pool") }
+
+    suspend fun myRides(): List<PastRide> = client.postgrest.rpc("my_rides").decodeList<PastRide>()
+
+    suspend fun messages(after: Long): List<ChatMessage> =
+        client.postgrest.rpc("pool_messages", buildJsonObject { put("p_after", after) }).decodeList<ChatMessage>()
+
+    suspend fun sendChat(body: String) {
+        client.postgrest.rpc("send_chat", buildJsonObject { put("p_body", body) })
+    }
+
+    suspend fun myProfile(): Profile? = client.postgrest.rpc("my_profile").decodeList<Profile>().firstOrNull()
+
+    suspend fun updateProfile(name: String, upi: String) {
+        client.postgrest.rpc("update_profile", buildJsonObject { put("p_name", name); put("p_upi", upi) })
+    }
+
+    /** Google Places through our edge function (key stays on the server). */
+    suspend fun searchPlaces(query: String, lat: Double?, lng: Double?): List<PlaceHit> {
+        val body = buildJsonObject {
+            put("q", query); if (lat != null && lng != null) { put("lat", lat); put("lng", lng) }
+        }
+        val res = client.functions.invoke("places", body)
+        return kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+            .decodeFromString<PlacesResponse>(res.bodyAsText()).places
     }
 
     /** Instant match: joins a pool with riders heading the same way right now, or starts searching. */
@@ -90,5 +127,44 @@ data class PoolRider(
     @SerialName("pickup_lng") val pickupLng: Double,
     @SerialName("drop_lat") val dropLat: Double,
     @SerialName("drop_lng") val dropLng: Double,
-    @SerialName("trip_km") val tripKm: Double
+    @SerialName("trip_km") val tripKm: Double,
+    @SerialName("board_km") val boardKm: Double = 0.0,
+    @SerialName("alight_km") val alightKm: Double = 0.0,
+    @SerialName("is_booker") val isBooker: Boolean = false,
+    @SerialName("upi_id") val upiId: String? = null,
+    val paid: Boolean = false,
+    @SerialName("pool_status") val poolStatus: String? = null,
+    @SerialName("fare_rupees") val fareRupees: Int? = null,
+    val provider: String? = null
 )
+
+@Serializable
+data class PastRide(
+    @SerialName("pool_id") val poolId: String,
+    @SerialName("done_at") val doneAt: String? = null,
+    @SerialName("pickup_label") val pickupLabel: String,
+    @SerialName("dropoff_label") val dropoffLabel: String,
+    @SerialName("trip_km") val tripKm: Double,
+    val riders: Int,
+    @SerialName("fare_rupees") val fareRupees: Int? = null,
+    val provider: String? = null
+)
+
+@Serializable
+data class ChatMessage(
+    val id: Long,
+    @SerialName("user_id") val userId: String,
+    @SerialName("is_me") val isMe: Boolean,
+    @SerialName("display_name") val displayName: String,
+    val body: String,
+    @SerialName("created_at") val createdAt: String
+)
+
+@Serializable
+data class Profile(@SerialName("display_name") val displayName: String? = null, @SerialName("upi_id") val upiId: String? = null)
+
+@Serializable
+data class PlaceHit(val name: String, val address: String = "", val lat: Double, val lng: Double)
+
+@Serializable
+data class PlacesResponse(val places: List<PlaceHit> = emptyList())

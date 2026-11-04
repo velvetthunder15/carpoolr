@@ -23,6 +23,8 @@ kyant-shapes = { group = "io.github.kyant0", name = "shapes", version.ref = "kya
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 supabase-bom = { group = "io.github.jan-tennert.supabase", name = "bom", version.ref = "supabase" }
 supabase-auth = { group = "io.github.jan-tennert.supabase", name = "auth-kt" }
+supabase-functions = { group = "io.github.jan-tennert.supabase", name = "functions-kt" }
+androidx-webkit = { group = "androidx.webkit", name = "webkit", version = "1.14.0" }
 supabase-postgrest = { group = "io.github.jan-tennert.supabase", name = "postgrest-kt" }
 ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }
 

@@ -36,7 +36,19 @@ object Places {
     /** Last device position (lat, lng), set by [DeviceLocation]. */
     @Volatile var lastFix: Pair<Double, Double>? = null
 
-    suspend fun search(query: String, near: Place?): List<Place> = withContext(Dispatchers.IO) {
+    /** Google Places (via our edge function) first; OpenStreetMap if that fails. */
+    suspend fun search(query: String, near: Place?): List<Place> {
+        if (query.isBlank()) return emptyList()
+        val lat = near?.lat ?: lastFix?.first
+        val lng = near?.lng ?: lastFix?.second
+        val google = runCatching { com.carpoolr.app.data.Backend.searchPlaces(query.trim(), lat, lng) }.getOrNull()
+        if (!google.isNullOrEmpty()) return google.map { h ->
+            Place(h.name, h.address.removePrefix(h.name).trimStart(',', ' ').removeSuffix(", India"), h.lat, h.lng)
+        }
+        return searchOsm(query, near)
+    }
+
+    private suspend fun searchOsm(query: String, near: Place?): List<Place> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
         val q = URLEncoder.encode(query.trim(), "UTF-8")
         // Bias hard toward the rider (pickup, else the last device fix) and keep results in India.
