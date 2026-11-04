@@ -1,8 +1,13 @@
 // carpoolr place search: Google Places API (New) Text Search, India only, biased to the rider.
 // The key lives in the function secret GOOGLE_PLACES_KEY and never ships in the app.
-const KEY = Deno.env.get("GOOGLE_PLACES_KEY") ?? "";
+const RAW = Deno.env.get("GOOGLE_PLACES_KEY") ?? "";
+const KEY = RAW.replace(/[^\x21-\x7e]/g, "");
 
 Deno.serve(async (req) => {
+  try { return await handle(req); } catch (e) { return json({ error: String(e) }, 500); }
+});
+
+async function handle(req: Request): Promise<Response> {
   if (req.method !== "POST") return new Response("POST only", { status: 405 });
   let q = "", lat: number | undefined, lng: number | undefined;
   try {
@@ -36,7 +41,7 @@ Deno.serve(async (req) => {
     lng: p.location?.longitude,
   })).filter((p: any) => p.name && typeof p.lat === "number");
   return json({ places });
-});
+}
 
 function json(o: unknown, status = 200) {
   return new Response(JSON.stringify(o), { status, headers: { "Content-Type": "application/json" } });
