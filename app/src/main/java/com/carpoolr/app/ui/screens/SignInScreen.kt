@@ -93,7 +93,7 @@ fun SignInScreen() {
     LaunchedEffect(windowFocused, codeSent) {
         if (windowFocused) {
             notifAccess = EmailOtpNotificationService.isEnabled(context)
-            if (codeSent && notifAccess) OtpWatcher.start(email)
+            if (codeSent && notifAccess) OtpWatcher.rescan()
         }
     }
 
@@ -139,7 +139,11 @@ fun SignInScreen() {
                 busy = true
                 scope.launch {
                     runCatching { Backend.sendCode(email) }
-                        .onSuccess { codeSent = true; error = null }
+                        .onSuccess {
+                            OtpWatcher.start(email, resetClock = true)
+                            codeSent = true
+                            error = null
+                        }
                         .onFailure { e ->
                             val msg = e.message.orEmpty()
                             if (msg.contains("seconds", true) || msg.contains("rate", true)) {

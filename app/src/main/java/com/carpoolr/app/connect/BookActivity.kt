@@ -422,6 +422,7 @@ class BookActivity : ComponentActivity() {
                 ?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
             val targetPkg = parsed.`package`
             val targetScheme = parsed.data?.scheme?.lowercase()
+            if (targetPkg == packageName) return true
             if (targetPkg in RIDE_PACKAGES || targetScheme in RIDE_SCHEMES) {
                 if (fallback != null) view.loadUrl(fallback)
                 return true

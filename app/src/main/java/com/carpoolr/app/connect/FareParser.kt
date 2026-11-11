@@ -118,10 +118,7 @@ object FareParser {
             val rawInline = line.replace(RUPEES, " ").trim().trim('-', '·', ':', '•').trim()
             val inline = rawInline.takeIf(::isProductLabel)
             // Skip consecutive bare price line (strikethrough original price right after discounted price)
-            if (inline == null && i > 0 && amount(lines[i - 1]) != null) {
-                val prevInline = lines[i - 1].replace(RUPEES, " ").trim().trim('-', '·', ':', '•').trim()
-                if (!isProductLabel(prevInline)) return@forEachIndexed
-            }
+            if (inline == null && i > 0 && amount(lines[i - 1]) != null) return@forEachIndexed
             val label = inline ?: (i - 1 downTo maxOf(0, i - 5)).asSequence()
                 .map { lines[it] }
                 .firstOrNull(::isProductLabel)

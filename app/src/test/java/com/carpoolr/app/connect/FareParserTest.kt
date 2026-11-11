@@ -73,5 +73,8 @@ class FareParserTest {
         assertEquals(listOf(FareOption("UberXL", 410)), FareParser.fromJson(json))
         val text = "Payment\n₹200\nAuto - ₹118"
         assertEquals(listOf(FareOption("Auto", 118)), FareParser.fromText(text))
+
+        val inlineStrike = "Premier\nUber Go - ₹212\n₹236"
+        assertEquals(listOf(FareOption("Uber Go", 212)), FareParser.fromText(inlineStrike))
     }
 }

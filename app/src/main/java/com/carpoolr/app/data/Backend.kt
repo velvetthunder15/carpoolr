@@ -51,6 +51,9 @@ object Backend {
 
     suspend fun signOut() = client.auth.signOut()
 
+    fun currentUserId(): String? =
+        client.auth.currentUserOrNull()?.id ?: client.auth.currentSessionOrNull()?.user?.id
+
     /** My live trip and everyone pooled with me (empty when I have none). Also retries the match. */
     suspend fun myPool(): List<PoolRider> =
         client.postgrest.rpc("my_pool").decodeList<PoolRider>()
@@ -82,9 +85,14 @@ object Backend {
         client.postgrest.rpc("send_chat", buildJsonObject { put("p_body", body) })
     }
 
-    suspend fun myProfile(): Profile? = client.postgrest.rpc("my_profile").decodeList<Profile>().firstOrNull()
+    suspend fun myProfileRow(): ProfileRow? =
+        client.postgrest.rpc("my_profile").decodeList<ProfileRow>().firstOrNull()
 
-    suspend fun updateProfile(p: Profile) {
+    /**
+     * Saves the rider's profile. Returns `true` when the full 0006 RPC succeeded,
+     * or `false` when it fell back to the 2-arg 0004 `update_profile(p_name, p_upi)` RPC.
+     */
+    suspend fun updateProfile(p: Profile): Boolean {
         val fullParams = buildJsonObject {
             put("p_name", p.displayName.orEmpty())
             put("p_upi", p.upiId.orEmpty())
@@ -99,7 +107,10 @@ object Backend {
             put("p_aadhaar_verified", p.aadhaarVerified)
             put("p_avatar_data", p.avatarData.orEmpty())
         }
-        runCatching { client.postgrest.rpc("update_profile", fullParams) }.onFailure { e ->
+        return runCatching {
+            client.postgrest.rpc("update_profile", fullParams)
+            true
+        }.getOrElse { e ->
             // Graceful fallback if migration 0006 has not been applied on the server yet
             if (e.message.orEmpty().contains("PGRST202") || e.message.orEmpty().contains("update_profile")) {
                 client.postgrest.rpc(
@@ -109,6 +120,7 @@ object Backend {
                         put("p_upi", p.upiId.orEmpty())
                     }
                 )
+                false
             } else throw e
         }
     }
@@ -216,6 +228,25 @@ data class ChatMessage(
     @SerialName("display_name") val displayName: String,
     val body: String,
     @SerialName("created_at") val createdAt: String
+)
+
+@Serializable
+data class ProfileRow(
+    @SerialName("display_name") val displayName: String? = null,
+    @SerialName("upi_id") val upiId: String? = null,
+    @SerialName("upi_verified") val upiVerified: Boolean? = null,
+    val phone: String? = null,
+    val dob: String? = null,
+    val gender: String? = null,
+    @SerialName("org_tag") val orgTag: String? = null,
+    @SerialName("emergency_name") val emergencyName: String? = null,
+    @SerialName("emergency_phone") val emergencyPhone: String? = null,
+    @SerialName("aadhaar_last4") val aadhaarLast4: String? = null,
+    @SerialName("aadhaar_verified") val aadhaarVerified: Boolean? = null,
+    @SerialName("avatar_data") val avatarData: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("pools_count") val poolsCount: Int = 0,
+    @SerialName("km_shared") val kmShared: Double = 0.0
 )
 
 @Serializable

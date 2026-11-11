@@ -25,21 +25,33 @@ object OtpWatcher {
     @Volatile var startedAtMs: Long = 0L
         private set
 
+    private val seenKeys = java.util.Collections.synchronizedSet(HashSet<String>())
     private val _codes = MutableSharedFlow<String>(extraBufferCapacity = 1)
     val codes: SharedFlow<String> = _codes.asSharedFlow()
 
-    fun start(email: String) {
-        awaitingEmail = email.trim()
-        startedAtMs = System.currentTimeMillis()
+    fun start(email: String, resetClock: Boolean = false) {
+        val clean = email.trim()
+        if (resetClock || !clean.equals(awaitingEmail, ignoreCase = true) || startedAtMs == 0L) {
+            startedAtMs = System.currentTimeMillis()
+            seenKeys.clear()
+        }
+        awaitingEmail = clean
         EmailOtpNotificationService.scanActive()
+    }
+
+    fun rescan() {
+        if (awaitingEmail != null) EmailOtpNotificationService.scanActive()
     }
 
     fun stop() {
         awaitingEmail = null
+        seenKeys.clear()
     }
 
-    internal fun emit(code: String) {
-        if (awaitingEmail != null) _codes.tryEmit(code)
+    internal fun emitOnce(dedupeKey: String, code: String) {
+        if (awaitingEmail != null && seenKeys.add(dedupeKey)) {
+            _codes.tryEmit(code)
+        }
     }
 }
 
@@ -73,14 +85,22 @@ class EmailOtpNotificationService : NotificationListenerService() {
         val targetEmail = OtpWatcher.awaitingEmail ?: return
         if (sbn.packageName == packageName) return
         // Ignore stale notifications that arrived well before the user requested a code.
-        if (sbn.postTime < OtpWatcher.startedAtMs - 60_000L) return
+        if (sbn.postTime < OtpWatcher.startedAtMs - 90_000L) return
 
-        val extras = sbn.notification?.extras ?: return
+        val notif = sbn.notification ?: return
+        if ((notif.flags and Notification.FLAG_GROUP_SUMMARY) != 0) {
+            val hasChildren = runCatching {
+                activeNotifications?.any { it.key != sbn.key && it.groupKey == sbn.groupKey } == true
+            }.getOrDefault(false)
+            if (hasChildren) return
+        }
+
+        val extras = notif.extras ?: return
         val combined = extractNotificationText(extras)
         if (combined.isBlank()) return
 
         val code = extractEmailOtp(combined, targetEmail) ?: return
-        OtpWatcher.emit(code)
+        OtpWatcher.emitOnce("${sbn.key}:${sbn.postTime}:$code", code)
     }
 
     companion object {

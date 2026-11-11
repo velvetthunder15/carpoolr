@@ -23,7 +23,9 @@ data class AadhaarQrData(
  */
 object AadhaarQrParser {
 
-    private val DECIMAL_QR = Regex("""^\d{200,}$""")
+    private const val MAX_DECOMPRESSED_BYTES = 64 * 1024
+    private val DECIMAL_QR = Regex("""^\d{200,8000}$""")
+    private val VERSION_MARKER = Regex("""^V\d+$""", RegexOption.IGNORE_CASE)
     private val XML_ATTR = Regex("""(\w+)\s*=\s*["']([^"']*)["']""")
     private val YOB_ONLY = Regex("""^\d{4}$""")
     private val ISO_DATE = Regex("""^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$""")
@@ -51,19 +53,20 @@ object AadhaarQrParser {
             throw IllegalArgumentException("incomplete aadhaar secure qr payload")
         }
 
-        // Read up to the first 16 0xFF-delimited text fields from the header
-        val fields = ArrayList<String>(16)
+        // Read 0xFF-delimited text fields strictly before the trailing 256-byte RSA signature
+        val signedEnd = decompressed.size - 256
+        val fields = ArrayList<String>(18)
         var start = 0
-        for (i in decompressed.indices) {
+        for (i in 0 until signedEnd) {
             if (decompressed[i] == 0xFF.toByte()) {
                 fields += String(decompressed, start, i - start, StandardCharsets.ISO_8859_1)
                 start = i + 1
-                if (fields.size >= 16) break
+                if (fields.size >= 18) break
             }
         }
         if (fields.size < 6) throw IllegalArgumentException("unrecognized aadhaar qr layout")
 
-        val offset = if (fields[0].startsWith("V", ignoreCase = true)) 1 else 0
+        val offset = if (VERSION_MARKER.matches(fields[0].trim())) 1 else 0
         val emailMobileFlag = fields[offset].trim()
         if (emailMobileFlag !in setOf("0", "1", "2", "3")) {
             throw IllegalArgumentException("unexpected aadhaar qr header")
@@ -140,12 +143,26 @@ object AadhaarQrParser {
 
     private fun decompress(bytes: ByteArray): ByteArray? {
         runCatching {
-            GZIPInputStream(ByteArrayInputStream(bytes)).use { return it.readBytes() }
+            GZIPInputStream(ByteArrayInputStream(bytes)).use { return readBounded(it) }
         }
         runCatching {
-            InflaterInputStream(ByteArrayInputStream(bytes)).use { return it.readBytes() }
+            InflaterInputStream(ByteArrayInputStream(bytes)).use { return readBounded(it) }
         }
         return null
+    }
+
+    private fun readBounded(stream: java.io.InputStream): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val buf = ByteArray(4096)
+        var total = 0
+        while (true) {
+            val n = stream.read(buf)
+            if (n < 0) break
+            total += n
+            if (total > MAX_DECOMPRESSED_BYTES) throw IllegalArgumentException("qr payload too large")
+            out.write(buf, 0, n)
+        }
+        return out.toByteArray()
     }
 
     internal fun normalizeDob(raw: String): String? {

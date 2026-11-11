@@ -276,7 +276,8 @@ class WebLoginActivity : ComponentActivity() {
             .firstOrNull {
                 val k = it.substringBefore('=').trim()
                 val v = it.substringAfter('=', "").trim()
-                v.length > 8 && (k.equals("sid", ignoreCase = true) || k.equals("jwt-session", ignoreCase = true))
+                // Ignore `jwt-session`: auth.uber.com/v2 sets a pre-auth jwt-session on initial load before OTP.
+                v.length > 8 && k.equals("sid", ignoreCase = true)
             }
     }
 

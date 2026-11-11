@@ -42,6 +42,7 @@ import com.carpoolr.app.connect.WebLoginActivity
 import com.carpoolr.app.connect.openProviderApp
 import com.carpoolr.app.data.Backend
 import com.carpoolr.app.data.Profile
+import com.carpoolr.app.profile.ProfileStore
 import com.carpoolr.app.ui.components.CarpoolrBackground
 import com.carpoolr.app.ui.components.CarpoolrBottomBar
 import com.carpoolr.app.ui.components.CarpoolrTopBar
@@ -82,12 +83,15 @@ fun CarpoolrApp() {
         }
     }
     val scope = rememberCoroutineScope()
-    var profile by remember { mutableStateOf<Profile?>(null) }
+    var profile by remember { mutableStateOf(ProfileStore.loadCached(context)) }
     var savingProfile by remember { mutableStateOf(false) }
 
     LaunchedEffect(profileOpen) {
+        val cached = ProfileStore.loadCached(context)
+        if (cached != null) profile = cached
         if (profileOpen || profile == null) {
-            runCatching { Backend.myProfile() }.onSuccess { if (it != null) profile = it }
+            val synced = ProfileStore.syncFromServer(context)
+            if (synced != null) profile = synced
         }
     }
 
@@ -154,6 +158,7 @@ fun CarpoolrApp() {
             onDismiss = { profileOpen = false }
         ) {
             ProfileContent(
+                visible = profileOpen,
                 onClose = { profileOpen = false },
                 isConnected = { p ->
                     connectionsVersion
@@ -170,6 +175,7 @@ fun CarpoolrApp() {
                 },
                 onSignOut = {
                     profileOpen = false
+                    ProfileStore.clearAll(context)
                     Provider.entries.forEach { connections.disconnect(it) }
                     runCatching {
                         CookieManager.getInstance().removeAllCookies(null)
@@ -180,13 +186,17 @@ fun CarpoolrApp() {
                 },
                 profile = profile,
                 saving = savingProfile,
-                onSaveProfile = { updated ->
+                onSaveProfile = { updated, toastMsg ->
+                    profile = updated
+                    ProfileStore.saveCached(context, updated, syncedRichSchema = false)
                     savingProfile = true
                     scope.launch {
-                        runCatching { Backend.updateProfile(updated) }
-                            .onSuccess {
-                                profile = updated
-                                Toast.makeText(context, "profile saved", Toast.LENGTH_SHORT).show()
+                        ProfileStore.persist(context, updated)
+                            .onSuccess { saved ->
+                                profile = saved
+                                if (!toastMsg.isNullOrBlank()) {
+                                    Toast.makeText(context, toastMsg, Toast.LENGTH_SHORT).show()
+                                }
                             }
                             .onFailure { e ->
                                 val msg = e.message?.lineSequence()?.firstOrNull()?.take(100)?.lowercase() ?: "couldn't save"
@@ -206,6 +216,7 @@ fun CarpoolrApp() {
                             context.startActivity(android.content.Intent(android.content.Intent.ACTION_SENDTO,
                                 android.net.Uri.parse("mailto:chiragrasane15@gmail.com?subject=carpoolr%20help")))
                         }
+                        "about" -> Toast.makeText(context, "carpoolr v0.1.0", Toast.LENGTH_SHORT).show()
                     }
                 }
             )

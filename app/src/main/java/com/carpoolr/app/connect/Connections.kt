@@ -45,10 +45,10 @@ internal fun cookieNamesFor(vararg urls: String): Set<String> {
     return out
 }
 
-/** True once auth.uber.com has issued an authenticated .uber.com session cookie (HttpOnly sid / jwt-session). */
+/** True once auth.uber.com has issued an authenticated .uber.com `sid` session cookie (ignores pre-auth `jwt-session`). */
 internal fun hasUberSessionCookie(): Boolean {
     val names = cookieNamesFor("https://m.uber.com", "https://auth.uber.com", "https://riders.uber.com")
-    return names.any { it.equals("sid", ignoreCase = true) || it.equals("jwt-session", ignoreCase = true) }
+    return names.any { it.equals("sid", ignoreCase = true) }
 }
 
 class ConnectionStore(context: Context) {
@@ -76,18 +76,29 @@ class ConnectionStore(context: Context) {
 
     fun disconnect(p: Provider) {
         prefs.edit().putBoolean(p.name, false).apply()
-        val url = p.cookieUrl ?: return
-        val cm = CookieManager.getInstance()
-        val rootDomain = Uri.parse(url).host?.let { h ->
-            val parts = h.split('.')
-            if (parts.size >= 2) "." + parts.takeLast(2).joinToString(".") else null
+        val urls = buildSet {
+            p.cookieUrl?.let(::add)
+            p.loginUrl?.let { add(Uri.parse(it).let { u -> "${u.scheme}://${u.host}" }) }
+            if (p == Provider.Uber) {
+                add("https://auth.uber.com")
+                add("https://riders.uber.com")
+            }
         }
-        cm.getCookie(url)?.split(";")?.forEach { pair ->
-            val name = pair.substringBefore("=").trim()
-            if (name.isNotEmpty()) {
-                cm.setCookie(url, "$name=; Path=/; Max-Age=0")
-                if (rootDomain != null) {
-                    cm.setCookie(url, "$name=; Domain=$rootDomain; Path=/; Max-Age=0; Secure")
+        val cm = CookieManager.getInstance()
+        for (url in urls) {
+            val rootDomain = Uri.parse(url).host?.let { h ->
+                val parts = h.split('.')
+                if (parts.size >= 2) "." + parts.takeLast(2).joinToString(".") else null
+            }
+            cm.getCookie(url)?.split(";")?.forEach { pair ->
+                val name = pair.substringBefore("=").trim()
+                if (name.isNotEmpty()) {
+                    cm.setCookie(url, "$name=; Path=/; Max-Age=0")
+                    cm.setCookie(url, "$name=; Path=/; Max-Age=0; Secure")
+                    if (rootDomain != null) {
+                        cm.setCookie(url, "$name=; Domain=$rootDomain; Path=/; Max-Age=0")
+                        cm.setCookie(url, "$name=; Domain=$rootDomain; Path=/; Max-Age=0; Secure")
+                    }
                 }
             }
         }
