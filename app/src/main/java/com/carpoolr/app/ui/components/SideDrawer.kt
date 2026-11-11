@@ -1,5 +1,6 @@
 package com.carpoolr.app.ui.components
 
+import android.app.DatePickerDialog
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -53,9 +54,13 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.OffsetMapping
+import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -416,7 +421,7 @@ private fun PersonalInfoPage(
     val scope = rememberCoroutineScope()
 
     var name by remember(profile?.displayName) { mutableStateOf(profile?.displayName.orEmpty()) }
-    var dob by remember(profile?.dob) { mutableStateOf(profile?.dob.orEmpty()) }
+    var dob by remember(profile?.dob) { mutableStateOf(profile?.dob.orEmpty().filter(Char::isDigit).take(8)) }
     var phone by remember(profile?.phone) { mutableStateOf(profile?.phone.orEmpty()) }
     var gender by remember(profile?.gender) { mutableStateOf(profile?.gender.orEmpty()) }
     var orgTag by remember(profile?.orgTag) { mutableStateOf(profile?.orgTag.orEmpty()) }
@@ -444,9 +449,11 @@ private fun PersonalInfoPage(
         overrideGender: String = gender
     ): Profile {
         val base = profile ?: Profile()
+        val formattedDob = UpiValidator.parseAdultDob(overrideDob).getOrNull()?.first
+            ?: overrideDob.trim().ifBlank { base.dob }
         return base.copy(
             displayName = overrideName.trim().ifBlank { base.displayName },
-            dob = overrideDob.trim().ifBlank { base.dob },
+            dob = formattedDob,
             gender = overrideGender.ifBlank { base.gender },
             aadhaarLast4 = overrideLast4,
             aadhaarVerified = overrideAadhaarOk && !overrideLast4.isNullOrBlank(),
@@ -464,9 +471,10 @@ private fun PersonalInfoPage(
             }
         } else {
             val origName = profile?.displayName.orEmpty().trim()
-            val origDob = profile?.dob.orEmpty().trim()
+            val origDobDigits = profile?.dob.orEmpty().filter(Char::isDigit).take(8)
+            val newDobDigits = newDob.filter(Char::isDigit).take(8)
             if ((origName.isNotEmpty() && !origName.equals(newName.trim(), ignoreCase = true)) ||
-                (origDob.isNotEmpty() && origDob != newDob.trim())
+                (origDobDigits.isNotEmpty() && origDobDigits != newDobDigits)
             ) {
                 aadhaarVerified = false
                 aadhaarNote = "details changed · re-scan aadhaar qr to keep id badge" to false
@@ -519,15 +527,17 @@ private fun PersonalInfoPage(
                     }
                 }
                 val candidateName = name.ifBlank { qr.name }
-                val candidateDob = if (dob.isBlank() && qr.dob != null && qr.dob.length == 10) qr.dob else dob
-                val mismatch = AadhaarQrParser.checkConsistency(qr, candidateName, candidateDob)
+                val qrDobDigits = qr.dob?.takeIf { it.length == 10 }?.filter(Char::isDigit)?.take(8)
+                val candidateDobDigits = if (dob.isBlank() && qrDobDigits != null) qrDobDigits else dob
+                val candidateDobFormatted = UpiValidator.parseAdultDob(candidateDobDigits).getOrNull()?.first ?: candidateDobDigits
+                val mismatch = AadhaarQrParser.checkConsistency(qr, candidateName, candidateDobFormatted)
                 if (mismatch != null) {
                     pendingQr = qr
                     aadhaarNote = mismatch to false
                 } else {
                     val nextGender = gender.ifBlank { qr.gender.orEmpty() }
                     name = candidateName
-                    dob = candidateDob
+                    dob = candidateDobDigits
                     gender = nextGender
                     pendingQr = null
                     verifiedQrSnapshot = qr
@@ -539,7 +549,7 @@ private fun PersonalInfoPage(
                             overrideLast4 = qr.last4,
                             overrideAadhaarOk = true,
                             overrideName = candidateName,
-                            overrideDob = candidateDob,
+                            overrideDob = candidateDobFormatted,
                             overrideGender = nextGender
                         ),
                         "aadhaar verified",
@@ -612,16 +622,38 @@ private fun PersonalInfoPage(
                     invalidateAadhaarIfEdited(v, dob)
                 }
             )
-            EditField(
-                label = "date of birth (18+)",
-                hint = "dd/mm/yyyy",
-                value = dob,
-                keyboardType = KeyboardType.Number,
-                onChange = {
-                    val v = it.filter { c -> c.isDigit() || c == '/' || c == '-' || c == '.' }.take(10)
-                    dob = v
+            DobField(
+                digits = dob,
+                onDigitsChange = { digits ->
+                    dob = digits
                     formError = null
-                    invalidateAadhaarIfEdited(name, v)
+                    val checkStr = UpiValidator.parseAdultDob(digits).getOrNull()?.first ?: digits
+                    invalidateAadhaarIfEdited(name, checkStr)
+                },
+                onPickCalendar = {
+                    val maxAdult = LocalDate.now().minusYears(18)
+                    val parsed = if (dob.length == 8) {
+                        val d = dob.substring(0, 2).toIntOrNull() ?: 15
+                        val m = dob.substring(2, 4).toIntOrNull() ?: 8
+                        val y = dob.substring(4, 8).toIntOrNull() ?: (maxAdult.year - 2)
+                        runCatching { LocalDate.of(y, m, d) }.getOrNull()
+                    } else null
+                    val init = parsed ?: maxAdult.minusYears(2)
+                    DatePickerDialog(
+                        context,
+                        { _, year, monthZeroBased, dayOfMonth ->
+                            val pickedDigits = "%02d%02d%04d".format(dayOfMonth, monthZeroBased + 1, year)
+                            dob = pickedDigits
+                            formError = null
+                            val checkStr = "%02d/%02d/%04d".format(dayOfMonth, monthZeroBased + 1, year)
+                            invalidateAadhaarIfEdited(name, checkStr)
+                        },
+                        init.year,
+                        init.monthValue - 1,
+                        init.dayOfMonth
+                    ).apply {
+                        datePicker.maxDate = maxAdult.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                    }.show()
                 }
             )
             EditField(
@@ -728,10 +760,11 @@ private fun PersonalInfoPage(
                 }
                 pendingQr?.let { qr ->
                     ActionChip("use aadhaar details (${qr.name.lowercase()}) & verify", CarpoolrColors.Cream.copy(alpha = 0.16f)) {
-                        val nextDob = if (qr.dob != null && qr.dob.length == 10) qr.dob else dob
+                        val nextDobDigits = qr.dob?.takeIf { it.length == 10 }?.filter(Char::isDigit)?.take(8) ?: dob
+                        val nextDobFormatted = UpiValidator.parseAdultDob(nextDobDigits).getOrNull()?.first ?: nextDobDigits
                         val nextGender = qr.gender ?: gender
                         name = qr.name
-                        dob = nextDob
+                        dob = nextDobDigits
                         gender = nextGender
                         aadhaarLast4 = qr.last4
                         aadhaarVerified = true
@@ -743,7 +776,7 @@ private fun PersonalInfoPage(
                                 overrideLast4 = qr.last4,
                                 overrideAadhaarOk = true,
                                 overrideName = qr.name,
-                                overrideDob = nextDob,
+                                overrideDob = nextDobFormatted,
                                 overrideGender = nextGender
                             ),
                             "aadhaar verified",
@@ -1229,6 +1262,88 @@ private fun FullWidthPill(
         contentAlignment = Alignment.Center
     ) {
         BasicText(text, style = TextStyle(Color.White, 15.sp, fontWeight = FontWeight.Bold))
+    }
+}
+
+private object DobVisualTransformation : VisualTransformation {
+    override fun filter(text: AnnotatedString): TransformedText {
+        val d = text.text.take(8)
+        val len = d.length
+        val formatted = buildString {
+            for (i in d.indices) {
+                if (i == 2 || i == 4) append(" / ")
+                append(d[i])
+            }
+        }
+        val mapping = object : OffsetMapping {
+            override fun originalToTransformed(offset: Int): Int {
+                val o = offset.coerceIn(0, len)
+                return when {
+                    o <= 2 -> o
+                    o <= 4 -> o + 3
+                    else -> o + 6
+                }
+            }
+
+            override fun transformedToOriginal(offset: Int): Int {
+                val raw = when {
+                    offset <= 2 -> offset
+                    offset <= 5 -> 2
+                    offset <= 7 -> offset - 3
+                    offset <= 10 -> 4
+                    else -> offset - 6
+                }
+                return raw.coerceIn(0, len)
+            }
+        }
+        return TransformedText(AnnotatedString(formatted), mapping)
+    }
+}
+
+@Composable
+private fun DobField(
+    digits: String,
+    onDigitsChange: (String) -> Unit,
+    onPickCalendar: () -> Unit
+) {
+    val ageLabel = remember(digits) {
+        if (digits.length == 8) {
+            UpiValidator.parseAdultDob(digits).getOrNull()?.second?.let { " · $it yrs" }.orEmpty()
+        } else ""
+    }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedRectangle(16.dp))
+            .background(CarpoolrColors.Cream.copy(alpha = 0.08f))
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            BasicText(
+                "date of birth (18+)$ageLabel",
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = TextStyle(CarpoolrColors.CreamMuted, 12.sp)
+            )
+            Box {
+                if (digits.isEmpty()) {
+                    BasicText("dd / mm / yyyy", style = TextStyle(CarpoolrColors.CreamFaint, 15.sp))
+                }
+                BasicTextField(
+                    value = digits,
+                    onValueChange = { onDigitsChange(it.filter(Char::isDigit).take(8)) },
+                    singleLine = true,
+                    visualTransformation = DobVisualTransformation,
+                    textStyle = TextStyle(CarpoolrColors.Cream, 15.sp, fontWeight = FontWeight.Medium),
+                    cursorBrush = SolidColor(CarpoolrColors.Raspberry),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+        Spacer(Modifier.width(8.dp))
+        ActionChip("calendar", CarpoolrColors.Cream.copy(alpha = 0.14f), onClick = onPickCalendar)
     }
 }
 

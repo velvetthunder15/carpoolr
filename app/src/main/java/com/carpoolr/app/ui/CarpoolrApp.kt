@@ -40,8 +40,10 @@ import com.carpoolr.app.connect.ConnectionStore
 import com.carpoolr.app.connect.Provider
 import com.carpoolr.app.connect.WebLoginActivity
 import com.carpoolr.app.connect.openProviderApp
+import com.carpoolr.app.auth.FirebasePhoneAuth
 import com.carpoolr.app.data.Backend
 import com.carpoolr.app.data.Profile
+import com.carpoolr.app.pool.MatchService
 import com.carpoolr.app.profile.ProfileStore
 import com.carpoolr.app.ui.components.CarpoolrBackground
 import com.carpoolr.app.ui.components.CarpoolrBottomBar
@@ -175,6 +177,8 @@ fun CarpoolrApp() {
                 },
                 onSignOut = {
                     profileOpen = false
+                    MatchService.stop(context)
+                    FirebasePhoneAuth.signOut(context)
                     ProfileStore.clearAll(context)
                     Provider.entries.forEach { connections.disconnect(it) }
                     runCatching {
@@ -182,7 +186,10 @@ fun CarpoolrApp() {
                         CookieManager.getInstance().flush()
                         WebStorage.getInstance().deleteAllData()
                     }
-                    scope.launch { runCatching { Backend.signOut() } }
+                    scope.launch {
+                        runCatching { Backend.leavePool() }
+                        runCatching { Backend.signOut() }
+                    }
                 },
                 profile = profile,
                 saving = savingProfile,

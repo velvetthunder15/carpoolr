@@ -4,6 +4,7 @@ import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.OtpType
 import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.providers.Google
 import io.github.jan.supabase.auth.providers.builtin.OTP
 import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.postgrest.Postgrest
@@ -47,6 +48,11 @@ object Backend {
 
     suspend fun verifyCode(email: String, code: String) {
         client.auth.verifyEmailOtp(type = OtpType.Email.EMAIL, email = email, token = code)
+    }
+
+    /** Launches Google OAuth and returns to carpoolr://auth once the rider picks an account. */
+    suspend fun signInWithGoogle() {
+        client.auth.signInWith(Google)
     }
 
     suspend fun signOut() = client.auth.signOut()
@@ -111,8 +117,9 @@ object Backend {
             client.postgrest.rpc("update_profile", fullParams)
             true
         }.getOrElse { e ->
-            // Graceful fallback if migration 0006 has not been applied on the server yet
-            if (e.message.orEmpty().contains("PGRST202") || e.message.orEmpty().contains("update_profile")) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            // Graceful fallback only if migration 0006 has not been applied on the server yet (PGRST202)
+            if (e.message.orEmpty().contains("PGRST202")) {
                 client.postgrest.rpc(
                     "update_profile",
                     buildJsonObject {

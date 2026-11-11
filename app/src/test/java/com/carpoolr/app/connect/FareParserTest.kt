@@ -77,4 +77,13 @@ class FareParserTest {
         val inlineStrike = "Premier\nUber Go - ₹212\n₹236"
         assertEquals(listOf(FareOption("Uber Go", 212)), FareParser.fromText(inlineStrike))
     }
+
+    @Test
+    fun ignoresRupeePromoBadgesInTextAndJson() {
+        val text = "Uber Go\n2 mins away\nSave ₹25\n₹212.45\n₹237.45"
+        assertEquals(listOf(FareOption("Uber Go", 212)), FareParser.fromText(text))
+
+        val json = """{"product":{"displayName":"Premier","discountAmount":"₹30","promo":"₹30 off","fare":"₹315"}}"""
+        assertEquals(listOf(FareOption("Premier", 315)), FareParser.fromJson(json))
+    }
 }

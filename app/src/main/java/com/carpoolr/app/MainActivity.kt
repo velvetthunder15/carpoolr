@@ -12,9 +12,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import com.carpoolr.app.auth.FirebasePhoneAuth
 import com.carpoolr.app.data.Backend
 import com.carpoolr.app.ui.CarpoolrApp
+import com.carpoolr.app.ui.screens.PhoneVerifyScreen
 import com.carpoolr.app.ui.screens.SignInScreen
 import com.carpoolr.app.ui.theme.CarpoolrColors
 import io.github.jan.supabase.auth.auth
@@ -31,8 +37,25 @@ class MainActivity : ComponentActivity() {
         Backend.client.handleDeeplinks(intent)
         setContent {
             val status by Backend.client.auth.sessionStatus.collectAsState()
-            when (status) {
-                is SessionStatus.Authenticated -> CarpoolrApp()
+            when (val current = status) {
+                is SessionStatus.Authenticated -> {
+                    val uid = current.session.user?.id ?: Backend.currentUserId()
+                    var verified by remember(uid) {
+                        mutableStateOf(FirebasePhoneAuth.isVerified(this@MainActivity, uid))
+                    }
+                    var skippedUnconfigured by rememberSaveable(uid) { mutableStateOf(false) }
+
+                    if (verified || skippedUnconfigured) {
+                        CarpoolrApp()
+                    } else {
+                        PhoneVerifyScreen(
+                            activity = this@MainActivity,
+                            userId = uid,
+                            onVerified = { verified = true },
+                            onSkipUnconfigured = { skippedUnconfigured = true }
+                        )
+                    }
+                }
                 is SessionStatus.Initializing -> Box(Modifier.fillMaxSize().background(CarpoolrColors.Green))
                 else -> SignInScreen()
             }

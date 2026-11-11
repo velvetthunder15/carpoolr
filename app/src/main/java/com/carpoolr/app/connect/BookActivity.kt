@@ -56,6 +56,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -98,6 +99,7 @@ class BookActivity : ComponentActivity() {
     private val main = Handler(Looper.getMainLooper())
     private val fares = mutableStateListOf<FareOption>()
     private var closed = false
+    private var onCrashRecreate: (() -> Unit)? = null
 
     private var geoCallback: GeolocationPermissions.Callback? = null
     private var geoOrigin: String? = null
@@ -109,7 +111,7 @@ class BookActivity : ComponentActivity() {
 
     private fun scanDom(view: WebView?) {
         if (closed || view == null) return
-        view.evaluateJavascript("(function(){return document.body?document.body.innerText.slice(0,30000):''})()") { raw ->
+        view.evaluateJavascript(DOM_TEXT_WITH_SHADOW_JS) { raw ->
             val text = runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull() ?: return@evaluateJavascript
             add(FareParser.fromText(text))
         }
@@ -165,6 +167,8 @@ class BookActivity : ComponentActivity() {
             var typed by remember { mutableStateOf("") }
             var picked by remember { mutableStateOf<FareOption?>(null) }
             var progress by remember { mutableIntStateOf(0) }
+            var webEpoch by remember { mutableIntStateOf(0) }
+            onCrashRecreate = { webEpoch++ }
             Column(Modifier.fillMaxSize().background(CarpoolrColors.Green)) {
                 Row(
                     Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 10.dp),
@@ -236,10 +240,12 @@ class BookActivity : ComponentActivity() {
                         Modifier.fillMaxWidth(progress / 100f).fillMaxHeight().background(CarpoolrColors.Raspberry)
                     )
                 }
-                AndroidView(
-                    modifier = Modifier.fillMaxWidth().weight(1f),
-                    factory = { ctx -> buildWebView(ctx, url) { progress = it } }
-                )
+                key(webEpoch) {
+                    AndroidView(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        factory = { ctx -> buildWebView(ctx, url) { progress = it } }
+                    )
+                }
                 Column(
                     Modifier.fillMaxWidth().background(CarpoolrColors.GreenDeep).navigationBarsPadding().imePadding()
                         .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -310,7 +316,7 @@ class BookActivity : ComponentActivity() {
         with(settings) {
             javaScriptEnabled = true
             domStorageEnabled = true
-            loadWithOverviewMode = true
+            loadWithOverviewMode = false
             useWideViewPort = true
             databaseEnabled = true
             setGeolocationEnabled(true)
@@ -342,7 +348,11 @@ class BookActivity : ComponentActivity() {
             }
 
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
-                if (!closed) runCatching { view.reload() }
+                if (!closed) {
+                    runCatching { (view.parent as? ViewGroup)?.removeView(view); view.destroy() }
+                    if (web === view) web = null
+                    main.post { onCrashRecreate?.invoke() }
+                }
                 return true
             }
         }
@@ -407,7 +417,6 @@ class BookActivity : ComponentActivity() {
         if (scheme in RIDE_SCHEMES) return true
         if (scheme in PAYMENT_SCHEMES) {
             val external = Intent(Intent.ACTION_VIEW, uri)
-                .addCategory(Intent.CATEGORY_BROWSABLE)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             runCatching { startActivity(external) }
                 .onFailure { if (scheme == "upi") Toast.makeText(this, "no upi app found", Toast.LENGTH_SHORT).show() }
@@ -415,7 +424,6 @@ class BookActivity : ComponentActivity() {
         }
         if (scheme == "intent") {
             val parsed = runCatching { Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME) }.getOrNull() ?: return true
-            parsed.addCategory(Intent.CATEGORY_BROWSABLE)
             parsed.component = null
             parsed.selector = null
             val fallback = parsed.getStringExtra("browser_fallback_url")
@@ -427,8 +435,17 @@ class BookActivity : ComponentActivity() {
                 if (fallback != null) view.loadUrl(fallback)
                 return true
             }
-            runCatching { startActivity(parsed.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                .onFailure { if (fallback != null) view.loadUrl(fallback) }
+            if (targetScheme == "http" || targetScheme == "https") {
+                val webTarget = parsed.dataString?.takeIf { it.startsWith("https://") || it.startsWith("http://") } ?: fallback
+                if (webTarget != null) view.loadUrl(webTarget)
+                return true
+            }
+            if (targetScheme in PAYMENT_SCHEMES) {
+                runCatching { startActivity(parsed.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    .onFailure { if (fallback != null) view.loadUrl(fallback) }
+                return true
+            }
+            if (fallback != null) view.loadUrl(fallback)
             return true
         }
         return true
@@ -436,6 +453,7 @@ class BookActivity : ComponentActivity() {
 
     override fun onDestroy() {
         closed = true
+        onCrashRecreate = null
         main.removeCallbacksAndMessages(null)
         web?.destroy(); web = null
         super.onDestroy()
@@ -483,9 +501,18 @@ class BookActivity : ComponentActivity() {
                     "&drop%5B0%5D=" + Uri.encode(place(dlat, dlng, dlabel))
                 Provider.Ola -> "https://book.olacabs.com/?pickup_name=${Uri.encode(plabel)}&lat=$plat&lng=$plng" +
                     "&drop_lat=$dlat&drop_lng=$dlng&drop_name=${Uri.encode(dlabel)}"
-                Provider.Rapido -> "https://m.rapido.bike/unup-home"
+                Provider.Rapido -> "https://m.rapido.bike/"
             }
         }
+
+        /** Reads visible text including Polymer open Shadow DOM roots (needed for book.olacabs.com). */
+        private const val DOM_TEXT_WITH_SHADOW_JS =
+            "(function(){try{var out=[];function walk(n){if(!n||out.length>600)return;" +
+                "if(n.shadowRoot)walk(n.shadowRoot);" +
+                "var kids=n.children;if(kids&&kids.length){for(var i=0;i<kids.length;i++)walk(kids[i]);}" +
+                "else if(n.innerText){var t=n.innerText.trim();if(t)out.push(t);}}" +
+                "if(document.body){var b=document.body.innerText||'';if(b)out.push(b);walk(document.body);}" +
+                "return out.join('\\n').slice(0,30000)}catch(e){return ''}})()"
 
         /** Copies every fetch/XHR response that mentions a fare or price to the app. */
         private const val HOOK_JS = """(function(){if(window.__cpHook)return;window.__cpHook=1;

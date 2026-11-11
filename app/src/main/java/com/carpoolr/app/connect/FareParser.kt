@@ -19,11 +19,12 @@ object FareParser {
     private val RUPEES = Regex("""(?:₹|Rs\.?|INR)\s?([\d,]+(?:\.\d{1,2})?)""")
     private val LABEL_KEYS = listOf("displayName", "productName", "vehicleViewName", "title", "name", "serviceName", "categoryName", "label")
     private val FARE_KEY = Regex("(fare|price|amount|estimate|cost|payable)", RegexOption.IGNORE_CASE)
+    private val EXCLUDED_FARE_KEY = Regex("(discount|saving|strike|original|base|cancel|surge|promo|off|min_|max_|tax)", RegexOption.IGNORE_CASE)
     private val NUMERIC_FARE_KEY = Regex("^(fare|final_?fare|total_?fare|estimated_?fare|payable_?amount|final_?amount|price|estimated_?price)$", RegexOption.IGNORE_CASE)
     private val E5_FARE_KEY = Regex("(fare|amount|estimate|price).*e5$", RegexOption.IGNORE_CASE)
 
     private val ETA_OR_DIST = Regex("""\b(\d+\s*(min|mins|minute|minutes|hr|hrs|sec|km|m)\b|away\b|\d{1,2}:\d{2}\s*(am|pm)?\b)""", RegexOption.IGNORE_CASE)
-    private val PROMO_OR_BADGE = Regex("""(%|\boff\b|\bsave\b|\bpromo\b|\bdiscount|\bfaster\b|\bcheaper\b|\bbest\s+value\b|\bapplied\b)""", RegexOption.IGNORE_CASE)
+    private val PROMO_OR_BADGE = Regex("""(%|\boff\b|\bsave\b|\bpromo\b|\bdiscount|\bcashback\b|\bfaster\b|\bcheaper\b|\bbest\s+value\b|\bapplied\b)""", RegexOption.IGNORE_CASE)
     private val UI_CHROME = Regex("""^(choose|select|book|confirm|payment|cash|personal|business|offers?|coupons?|pickup|drop|total|fare|wallet|upi|riding|recommended)\b""", RegexOption.IGNORE_CASE)
     private val TAGLINE_PROSE = Regex("""\b(affordable|compact|comfortable|comfy|doorstep|haggling|everyday|economical|drivers|top-quality|ac\s+cabs|rides\s+for|spacious)\b""", RegexOption.IGNORE_CASE)
 
@@ -71,22 +72,28 @@ object FareParser {
     }
 
     private fun extractFare(e: JsonObject): Int? {
-        // 1. Direct string field carrying ₹ / Rs / INR
+        // 1. Direct string field carrying ₹ / Rs / INR (excluding discount/original/promo keys & promo strings)
         e.entries.firstNotNullOfOrNull { (k, v) ->
+            if (EXCLUDED_FARE_KEY.containsMatchIn(k)) return@firstNotNullOfOrNull null
             val s = (v as? JsonPrimitive)?.contentOrNull ?: return@firstNotNullOfOrNull null
+            if (PROMO_OR_BADGE.containsMatchIn(s)) return@firstNotNullOfOrNull null
             if (FARE_KEY.containsMatchIn(k) || s.trimStart().startsWith("₹")) amount(s) else null
         }?.let { return it }
 
         // 2. Nested 1-level object carrying ₹ / Rs / INR: { fare: { display: "₹212" } }
         e.entries.firstNotNullOfOrNull { (k, v) ->
+            if (EXCLUDED_FARE_KEY.containsMatchIn(k)) return@firstNotNullOfOrNull null
             if (FARE_KEY.containsMatchIn(k) && v is JsonObject)
-                v.values.firstNotNullOfOrNull { (it as? JsonPrimitive)?.contentOrNull?.let(::amount) }
+                v.entries.firstNotNullOfOrNull { (nk, nv) ->
+                    if (EXCLUDED_FARE_KEY.containsMatchIn(nk)) null
+                    else (nv as? JsonPrimitive)?.contentOrNull?.takeIf { !PROMO_OR_BADGE.containsMatchIn(it) }?.let(::amount)
+                }
             else null
         }?.let { return it }
 
         // 3. Micro-unit E5 numeric fields (e.g. fareAmountE5 = 21200000 -> ₹212)
         e.entries.firstNotNullOfOrNull { (k, v) ->
-            if (!E5_FARE_KEY.containsMatchIn(k)) return@firstNotNullOfOrNull null
+            if (!E5_FARE_KEY.containsMatchIn(k) || EXCLUDED_FARE_KEY.containsMatchIn(k)) return@firstNotNullOfOrNull null
             (v as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()
                 ?.takeIf { it > 0.0 }?.div(100_000.0)
                 ?.takeIf { it in 15.0..50000.0 }?.roundToInt()
@@ -114,11 +121,14 @@ object FareParser {
         val lines = pageText.lines().map { it.trim() }.filter { it.isNotEmpty() }
         val out = ArrayList<FareOption>()
         lines.forEachIndexed { i, line ->
+            if (PROMO_OR_BADGE.containsMatchIn(line)) return@forEachIndexed
             val fare = amount(line) ?: return@forEachIndexed
             val rawInline = line.replace(RUPEES, " ").trim().trim('-', '·', ':', '•').trim()
             val inline = rawInline.takeIf(::isProductLabel)
             // Skip consecutive bare price line (strikethrough original price right after discounted price)
-            if (inline == null && i > 0 && amount(lines[i - 1]) != null) return@forEachIndexed
+            if (inline == null && i > 0 && !PROMO_OR_BADGE.containsMatchIn(lines[i - 1]) && amount(lines[i - 1]) != null) {
+                return@forEachIndexed
+            }
             val label = inline ?: (i - 1 downTo maxOf(0, i - 5)).asSequence()
                 .map { lines[it] }
                 .firstOrNull(::isProductLabel)

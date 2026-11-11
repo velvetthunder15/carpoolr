@@ -44,7 +44,10 @@ object Places {
         val lng = near?.lng ?: lastFix?.second
         if (System.currentTimeMillis() >= googleRetryAfterMs) {
             val google = runCatching { com.carpoolr.app.data.Backend.searchPlaces(query.trim(), lat, lng) }
-                .onFailure { googleRetryAfterMs = System.currentTimeMillis() + 5 * 60_000L }
+                .onFailure {
+                    if (it is kotlinx.coroutines.CancellationException) throw it
+                    googleRetryAfterMs = System.currentTimeMillis() + 5 * 60_000L
+                }
                 .getOrNull()
             if (!google.isNullOrEmpty()) return google.map { h ->
                 Place(h.name, h.address.removePrefix(h.name).trimStart(',', ' ').removeSuffix(", India"), h.lat, h.lng)

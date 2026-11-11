@@ -20,7 +20,7 @@ object UpiValidator {
 
     private val LOCAL_PART = Regex("""^[a-z0-9][a-z0-9._-]{0,62}[a-z0-9]$""")
     private val HANDLE_PART = Regex("""^[a-z][a-z0-9]{1,31}$""")
-    private val INDIAN_MOBILE = Regex("""^(?:\+?91[\s-]?)?([6-9]\d{9})$""")
+    private val INDIAN_MOBILE = Regex("""^(?:(?:\+?91|0)[\s-]?)?([6-9]\d{9})$""")
     private val DOB_PATTERN = Regex("""^(\d{1,2})[/.\-\s](\d{1,2})[/.\-\s](\d{4})$""")
     private val DOB_COMPACT = Regex("""^(\d{2})(\d{2})(\d{4})$""")
 

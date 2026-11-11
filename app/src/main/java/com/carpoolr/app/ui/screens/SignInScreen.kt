@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
 import android.util.Patterns
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,6 +22,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -36,8 +38,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.painterResource
@@ -59,7 +65,7 @@ import kotlinx.coroutines.launch
 
 private val PLAIN_SIX_DIGITS = Regex("""(?<!\d)(\d{6})(?!\d)""")
 
-/** Email OTP: enter email, get a 6-digit code, auto-pickup from email notification (or paste/type). */
+/** Google OAuth + Email OTP sign-in (with automatic email notification OTP pickup). */
 @Composable
 fun SignInScreen() {
     val context = LocalContext.current
@@ -68,6 +74,7 @@ fun SignInScreen() {
     var code by rememberSaveable { mutableStateOf("") }
     var codeSent by rememberSaveable { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var googleBusy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var notifAccess by remember { mutableStateOf(EmailOtpNotificationService.isEnabled(context)) }
     val scope = rememberCoroutineScope()
@@ -92,6 +99,7 @@ fun SignInScreen() {
 
     LaunchedEffect(windowFocused, codeSent) {
         if (windowFocused) {
+            googleBusy = false
             notifAccess = EmailOtpNotificationService.isEnabled(context)
             if (codeSent && notifAccess) OtpWatcher.rescan()
         }
@@ -127,12 +135,40 @@ fun SignInScreen() {
         )
         Spacer(Modifier.height(16.dp))
         BasicText("carpoolr", style = TextStyle(CarpoolrColors.Cream, 52.sp, fontFamily = Anton))
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(26.dp))
 
         if (!codeSent) {
+            GoogleSignInPill(
+                busy = googleBusy,
+                enabled = !busy && !googleBusy
+            ) {
+                googleBusy = true
+                error = null
+                scope.launch {
+                    runCatching { Backend.signInWithGoogle() }
+                        .onFailure { e ->
+                            googleBusy = false
+                            error = "couldn't open google sign-in: " +
+                                e.message.orEmpty().lineSequence().firstOrNull().orEmpty().take(100).lowercase()
+                        }
+                }
+            }
+
+            Spacer(Modifier.height(18.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f).height(1.dp).background(CarpoolrColors.Cream.copy(alpha = 0.14f)))
+                BasicText(
+                    "or with email",
+                    style = TextStyle(CarpoolrColors.CreamMuted, 12.5.sp),
+                    modifier = Modifier.padding(horizontal = 12.dp)
+                )
+                Box(Modifier.weight(1f).height(1.dp).background(CarpoolrColors.Cream.copy(alpha = 0.14f)))
+            }
+            Spacer(Modifier.height(18.dp))
+
             Field(email, { email = it.trim(); error = null }, "email", KeyboardType.Email)
             Spacer(Modifier.height(14.dp))
-            Pill(if (busy) "sending…" else "send code", enabled = !busy) {
+            Pill(if (busy) "sending…" else "send code", enabled = !busy && !googleBusy) {
                 if (!Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
                     error = "that email doesn't look right"; return@Pill
                 }
@@ -156,15 +192,6 @@ fun SignInScreen() {
                     busy = false
                 }
             }
-            Spacer(Modifier.height(14.dp))
-            BasicText(
-                "i already have a code",
-                style = TextStyle(CarpoolrColors.CreamMuted, 14.sp),
-                modifier = Modifier.clickable {
-                    if (Patterns.EMAIL_ADDRESS.matcher(email).matches()) { codeSent = true; error = null }
-                    else error = "enter your email first"
-                }
-            )
         } else {
             BasicText("code sent to $email", style = TextStyle(CarpoolrColors.CreamMuted, 14.sp))
             Spacer(Modifier.height(4.dp))
@@ -225,6 +252,50 @@ fun SignInScreen() {
             Spacer(Modifier.height(12.dp))
             BasicText(it, style = TextStyle(CarpoolrColors.Raspberry, 14.sp, fontWeight = FontWeight.Medium))
         }
+    }
+}
+
+@Composable
+private fun GoogleSignInPill(busy: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val source = remember { MutableInteractionSource() }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .pressScale(source, 0.95f)
+            .clip(Capsule())
+            .background(if (enabled) CarpoolrColors.Cream else CarpoolrColors.Cream.copy(alpha = 0.55f))
+            .clickable(interactionSource = source, indication = null, enabled = enabled, onClick = onClick)
+            .padding(vertical = 15.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        GoogleGMark()
+        Spacer(Modifier.width(10.dp))
+        BasicText(
+            if (busy) "opening google…" else "continue with google",
+            style = TextStyle(CarpoolrColors.GreenDeep, 16.sp, fontWeight = FontWeight.Bold)
+        )
+    }
+}
+
+@Composable
+private fun GoogleGMark() {
+    Canvas(Modifier.size(18.dp)) {
+        val stroke = 3.2.dp.toPx()
+        val inset = stroke / 2f
+        val arcSize = Size(size.width - stroke, size.height - stroke)
+        val topLeft = Offset(inset, inset)
+        drawArc(Color(0xFFEA4335), startAngle = -145f, sweepAngle = 105f, useCenter = false, topLeft = topLeft, size = arcSize, style = Stroke(stroke, cap = StrokeCap.Butt))
+        drawArc(Color(0xFFFBBC05), startAngle = 135f, sweepAngle = 80f, useCenter = false, topLeft = topLeft, size = arcSize, style = Stroke(stroke, cap = StrokeCap.Butt))
+        drawArc(Color(0xFF34A853), startAngle = 45f, sweepAngle = 90f, useCenter = false, topLeft = topLeft, size = arcSize, style = Stroke(stroke, cap = StrokeCap.Butt))
+        drawArc(Color(0xFF4285F4), startAngle = -12f, sweepAngle = 60f, useCenter = false, topLeft = topLeft, size = arcSize, style = Stroke(stroke, cap = StrokeCap.Butt))
+        drawLine(
+            color = Color(0xFF4285F4),
+            start = Offset(size.width * 0.52f, size.height * 0.5f),
+            end = Offset(size.width - inset * 0.6f, size.height * 0.5f),
+            strokeWidth = stroke,
+            cap = StrokeCap.Butt
+        )
     }
 }
 
