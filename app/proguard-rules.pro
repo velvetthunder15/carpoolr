@@ -7,3 +7,7 @@
 # Keep @Serializable models used for RPC results.
 -keep,includedescriptorclasses class com.carpoolr.app.data.**$$serializer { *; }
 -keepclassmembers class com.carpoolr.app.data.** { *** Companion; kotlinx.serialization.KSerializer serializer(...); }
+# Keep WebView JavaScript bridge in BookActivity.
+-keepclassmembers class com.carpoolr.app.connect.BookActivity$Bridge {
+    @android.webkit.JavascriptInterface <methods>;
+}

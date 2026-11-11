@@ -124,8 +124,12 @@ fun HomeScreen(cardBackdrop: Backdrop, contentPadding: PaddingValues) {
         }
     }
 
-    // live trip: poll (this also retries the match on the server)
+    // live trip: poll (this also retries the match on the server) and keep MatchService armed while searching
     val live = trip?.isNotEmpty() == true
+    val searching = trip?.let { it.size == 1 && it.first().status == "searching" } == true
+    LaunchedEffect(searching) {
+        if (searching) MatchService.start(context)
+    }
     LaunchedEffect(live) {
         while (live) {
             delay(3000)
@@ -197,6 +201,9 @@ fun HomeScreen(cardBackdrop: Backdrop, contentPadding: PaddingValues) {
                         val p = pickup; val d = drop
                         if (p == null) { error = "set a pickup first"; return@PrimaryPill }
                         if (d == null) { error = "where are you going?"; picking = Picking.Drop; return@PrimaryPill }
+                        val dist = FloatArray(1)
+                        android.location.Location.distanceBetween(p.lat, p.lng, d.lat, d.lng, dist)
+                        if (dist[0] < 200f) { error = "pickup and drop are too close"; return@PrimaryPill }
                         busy = true; error = null
                         scope.launch {
                             runCatching { Backend.findPool(p.lat, p.lng, p.name, d.lat, d.lng, d.name) }
@@ -313,9 +320,9 @@ private fun PoolCard(
 }
 
 /** Opens the rider's UPI app with the amount filled in. */
-private fun payUpi(context: android.content.Context, vpa: String, name: String, rupees: Int) {
+internal fun payUpi(context: android.content.Context, vpa: String, name: String, rupees: Int) {
     val uri = android.net.Uri.Builder().scheme("upi").authority("pay")
-        .appendQueryParameter("pa", vpa).appendQueryParameter("pn", name)
+        .appendQueryParameter("pa", vpa.trim()).appendQueryParameter("pn", name)
         .appendQueryParameter("am", "$rupees.00").appendQueryParameter("cu", "INR")
         .appendQueryParameter("tn", "carpoolr ride share").build()
     val intent = android.content.Intent(android.content.Intent.ACTION_VIEW, uri)
@@ -508,7 +515,7 @@ private fun PrimaryPill(
     }
 }
 
-private fun toast(context: android.content.Context, e: Throwable) {
+internal fun toast(context: android.content.Context, e: Throwable) {
     val msg = e.message?.lineSequence()?.firstOrNull()?.take(120)?.lowercase() ?: "something went wrong"
     android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
 }

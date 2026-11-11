@@ -64,10 +64,16 @@ object Backend {
         client.postgrest.rpc("set_booking", buildJsonObject { put("p_fare", fareRupees); put("p_provider", provider) })
     }
 
-    suspend fun markPaid() { client.postgrest.rpc("mark_paid") }
+    suspend fun markPaid(poolId: String? = null) {
+        if (poolId == null) client.postgrest.rpc("mark_paid")
+        else client.postgrest.rpc("mark_paid", buildJsonObject { put("p_pool", poolId) })
+    }
     suspend fun finishPool() { client.postgrest.rpc("finish_pool") }
 
     suspend fun myRides(): List<PastRide> = client.postgrest.rpc("my_rides").decodeList<PastRide>()
+
+    suspend fun rideMessages(poolId: String): List<ChatMessage> =
+        client.postgrest.rpc("ride_messages", buildJsonObject { put("p_pool", poolId) }).decodeList<ChatMessage>()
 
     suspend fun messages(after: Long): List<ChatMessage> =
         client.postgrest.rpc("pool_messages", buildJsonObject { put("p_after", after) }).decodeList<ChatMessage>()
@@ -88,6 +94,7 @@ object Backend {
             put("q", query); if (lat != null && lng != null) { put("lat", lat); put("lng", lng) }
         }
         val res = client.functions.invoke("places", body)
+        if (res.status.value !in 200..299) throw IllegalStateException("places ${res.status.value}")
         return kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
             .decodeFromString<PlacesResponse>(res.bodyAsText()).places
     }
@@ -139,6 +146,17 @@ data class PoolRider(
 )
 
 @Serializable
+data class RideLeg(
+    @SerialName("rider_id") val riderId: String,
+    @SerialName("is_me") val isMe: Boolean = false,
+    @SerialName("display_name") val displayName: String = "rider",
+    @SerialName("board_km") val boardKm: Double = 0.0,
+    @SerialName("alight_km") val alightKm: Double = 0.0,
+    val paid: Boolean = false,
+    @SerialName("is_booker") val isBooker: Boolean = false
+)
+
+@Serializable
 data class PastRide(
     @SerialName("pool_id") val poolId: String,
     @SerialName("done_at") val doneAt: String? = null,
@@ -147,7 +165,12 @@ data class PastRide(
     @SerialName("trip_km") val tripKm: Double,
     val riders: Int,
     @SerialName("fare_rupees") val fareRupees: Int? = null,
-    val provider: String? = null
+    val provider: String? = null,
+    @SerialName("is_booker") val isBooker: Boolean = false,
+    val paid: Boolean = true,
+    @SerialName("booker_name") val bookerName: String? = null,
+    @SerialName("booker_upi") val bookerUpi: String? = null,
+    val legs: List<RideLeg> = emptyList()
 )
 
 @Serializable

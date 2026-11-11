@@ -35,15 +35,20 @@ object Places {
 
     /** Last device position (lat, lng), set by [DeviceLocation]. */
     @Volatile var lastFix: Pair<Double, Double>? = null
+    @Volatile private var googleRetryAfterMs: Long = 0L
 
-    /** Google Places (via our edge function) first; OpenStreetMap if that fails. */
+    /** Google Places (via our edge function) first; OpenStreetMap if that fails (with 5-min cooldown on error). */
     suspend fun search(query: String, near: Place?): List<Place> {
         if (query.isBlank()) return emptyList()
         val lat = near?.lat ?: lastFix?.first
         val lng = near?.lng ?: lastFix?.second
-        val google = runCatching { com.carpoolr.app.data.Backend.searchPlaces(query.trim(), lat, lng) }.getOrNull()
-        if (!google.isNullOrEmpty()) return google.map { h ->
-            Place(h.name, h.address.removePrefix(h.name).trimStart(',', ' ').removeSuffix(", India"), h.lat, h.lng)
+        if (System.currentTimeMillis() >= googleRetryAfterMs) {
+            val google = runCatching { com.carpoolr.app.data.Backend.searchPlaces(query.trim(), lat, lng) }
+                .onFailure { googleRetryAfterMs = System.currentTimeMillis() + 5 * 60_000L }
+                .getOrNull()
+            if (!google.isNullOrEmpty()) return google.map { h ->
+                Place(h.name, h.address.removePrefix(h.name).trimStart(',', ' ').removeSuffix(", India"), h.lat, h.lng)
+            }
         }
         return searchOsm(query, near)
     }
