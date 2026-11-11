@@ -1,24 +1,25 @@
 package com.carpoolr.app.connect
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
-import android.os.Message
-import android.view.ViewGroup
-import android.Manifest
-import android.content.pm.PackageManager
 import android.os.Handler
 import android.os.Looper
+import android.os.Message
+import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
@@ -27,6 +28,7 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContract
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -56,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
 import com.carpoolr.app.R
 import com.carpoolr.app.ui.components.GlassIcon
 import com.carpoolr.app.ui.components.pressScale
@@ -68,7 +71,7 @@ import androidx.compose.ui.graphics.Color as ComposeColor
 /**
  * Full-screen sign-in on the provider's own mobile site, in its own activity so no liquid-glass
  * layers sit around the WebView. App links (uber://, intent://) stay on the web, popups open in
- * place, and "done" reports whether the site set login cookies.
+ * place, and Uber's HttpOnly session cookie is detected as soon as OTP/login completes.
  */
 class WebLoginActivity : ComponentActivity() {
 
@@ -76,8 +79,9 @@ class WebLoginActivity : ComponentActivity() {
     private lateinit var provider: Provider
     private val main = Handler(Looper.getMainLooper())
     private var finished = false
-    private var leftLoginPage = false       // uber: reached auth.uber.com at least once
-    private var baseline: Set<String>? = null // ola: session-ish keys present before sign-in
+    private var leftLoginPage = false
+    private var initialUberSession: String? = null
+    private var baseline: Set<String>? = null
 
     private var geoCallback: GeolocationPermissions.Callback? = null
     private var geoOrigin: String? = null
@@ -87,12 +91,12 @@ class WebLoginActivity : ComponentActivity() {
         geoCallback = null
     }
 
-    /** Polls the page for a signed-in session and closes on its own once it finds one. */
+    /** Polls the page and CookieManager for a signed-in session and closes on its own once found. */
     private val poll = object : Runnable {
         override fun run() {
             if (finished) return
             web?.let { checkSignedIn(it) }
-            main.postDelayed(this, 1200)
+            main.postDelayed(this, 1000)
         }
     }
 
@@ -103,7 +107,7 @@ class WebLoginActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT)
         )
         super.onCreate(savedInstanceState)
-        if ((applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+        if ((applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
             WebView.setWebContentsDebuggingEnabled(true)
         }
         provider = Provider.valueOf(intent.getStringExtra(EXTRA_PROVIDER) ?: run { finish(); return })
@@ -144,7 +148,6 @@ class WebLoginActivity : ComponentActivity() {
                             .clip(Capsule())
                             .background(CarpoolrColors.Raspberry)
                             .clickable(doneSource, null) {
-                                // manual fallback; the store still checks for real cookies
                                 CookieManager.getInstance().flush()
                                 setResult(Activity.RESULT_OK)
                                 finish()
@@ -152,7 +155,6 @@ class WebLoginActivity : ComponentActivity() {
                             .padding(horizontal = 18.dp, vertical = 9.dp)
                     ) { BasicText("done", style = TextStyle(ComposeColor.White, 15.sp, fontWeight = FontWeight.Bold)) }
                 }
-                // thin load bar
                 Box(Modifier.fillMaxWidth().height(2.dp)) {
                     if (progress in 1..99) Box(
                         Modifier.fillMaxWidth(progress / 100f).fillMaxHeight().background(CarpoolrColors.Raspberry)
@@ -179,33 +181,42 @@ class WebLoginActivity : ComponentActivity() {
                 databaseEnabled = true
                 setGeolocationEnabled(true)
                 mediaPlaybackRequiresUserGesture = false
+                mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                 setSupportMultipleWindows(true)
                 javaScriptCanOpenWindowsAutomatically = true
-                // Drop the WebView marker so sites serve their normal mobile sign-in.
-                userAgentString = userAgentString.replace("; wv", "")
+                userAgentString = cleanMobileChromeUa(userAgentString)
             }
             CookieManager.getInstance().setAcceptCookie(true)
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+            if (provider == Provider.Uber) initialUberSession = currentUberSessionToken()
 
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
                     handleUrl(view, request.url)
 
+                override fun onPageStarted(view: WebView, url: String?, favicon: android.graphics.Bitmap?) {
+                    noteUberHost(url)
+                    checkSignedIn(view)
+                }
+
                 override fun onPageFinished(view: WebView, url: String?) {
-                    if (url != null && Uri.parse(url).host == "auth.uber.com") leftLoginPage = true
+                    noteUberHost(url)
                     checkSignedIn(view)
                 }
 
                 override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
-                    // SPA route changes (rapido, ola) don't fire onPageFinished
-                    if (url != null && Uri.parse(url).host == "auth.uber.com") leftLoginPage = true
+                    noteUberHost(url)
                     checkSignedIn(view)
+                }
+
+                override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                    if (!finished) runCatching { view.reload() }
+                    return true
                 }
             }
             webChromeClient = object : WebChromeClient() {
                 override fun onProgressChanged(view: WebView, newProgress: Int) = onProgress(newProgress)
 
-                // Rapido and Uber ask for location; without an answer their pages can sit blank.
                 override fun onGeolocationPermissionsShowPrompt(origin: String, callback: GeolocationPermissions.Callback) {
                     val granted = ContextCompat.checkSelfPermission(this@WebLoginActivity, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
                         ContextCompat.checkSelfPermission(this@WebLoginActivity, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
@@ -216,9 +227,14 @@ class WebLoginActivity : ComponentActivity() {
                     }
                 }
 
-                // Popups (target=_blank, window.open) load in this same page.
+                @SuppressLint("SetJavaScriptEnabled")
                 override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean {
-                    val popup = WebView(view.context)
+                    val popup = WebView(view.context).apply {
+                        settings.javaScriptEnabled = true
+                        settings.domStorageEnabled = true
+                        settings.userAgentString = cleanMobileChromeUa(settings.userAgentString)
+                        CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                    }
                     popup.webViewClient = object : WebViewClient() {
                         private var taken = false
                         private fun take(v: WebView, url: Uri) {
@@ -243,17 +259,39 @@ class WebLoginActivity : ComponentActivity() {
             }
             web = this
             loadUrl(provider.loginUrl ?: "about:blank")
-            main.postDelayed(poll, 2000)
+            main.postDelayed(poll, 1200)
         }
+
+    private fun noteUberHost(url: String?) {
+        val host = url?.let { Uri.parse(it).host }?.lowercase() ?: return
+        if (host == "auth.uber.com" || host == "login.uber.com") leftLoginPage = true
+    }
+
+    private fun currentUberSessionToken(): String? {
+        val cm = CookieManager.getInstance()
+        return listOf("https://m.uber.com", "https://auth.uber.com", "https://riders.uber.com")
+            .asSequence()
+            .flatMap { u -> cm.getCookie(u).orEmpty().split(';').asSequence() }
+            .map { it.trim() }
+            .firstOrNull {
+                val k = it.substringBefore('=').trim()
+                val v = it.substringAfter('=', "").trim()
+                v.length > 8 && (k.equals("sid", ignoreCase = true) || k.equals("jwt-session", ignoreCase = true))
+            }
+    }
 
     /** Provider-specific check for a live session; closes the page by itself when signed in. */
     private fun checkSignedIn(view: WebView) {
         if (finished) return
-        val host = Uri.parse(view.url ?: return).host ?: return
+        val host = Uri.parse(view.url ?: return).host?.lowercase() ?: return
         when (provider) {
             Provider.Uber -> {
-                // auth.uber.com sends you back to m.uber.com only after a successful sign-in
-                if (leftLoginPage && host == "m.uber.com") signedIn()
+                val token = currentUberSessionToken()
+                // Close immediately once auth.uber.com sets a fresh .uber.com sid/jwt-session cookie,
+                // or once an already-valid session redirects onto Uber's rider web host.
+                val freshCookie = token != null && token != initialUberSession
+                val landedSignedIn = leftLoginPage && host in UBER_APP_HOSTS && token != null
+                if (freshCookie || landedSignedIn) signedIn()
             }
             Provider.Rapido -> if (host == "m.rapido.bike") {
                 view.evaluateJavascript(
@@ -277,21 +315,42 @@ class WebLoginActivity : ComponentActivity() {
         CookieManager.getInstance().flush()
         ConnectionStore(this).markConnected(provider)
         setResult(Activity.RESULT_OK, Intent().putExtra(EXTRA_AUTO, true))
-        main.postDelayed({ finish() }, 400)
+        main.postDelayed({ finish() }, 350)
     }
 
-    /** Keeps http(s) in the page; turns intent:// into its web fallback; ignores app-only schemes. */
+    /** Keeps http(s) in the page; recovers from post-auth app handoff schemes instead of leaving a white page. */
     private fun handleUrl(view: WebView, uri: Uri, forceLoad: Boolean = false): Boolean {
-        return when (uri.scheme?.lowercase()) {
-            "http", "https" -> { if (forceLoad) view.loadUrl(uri.toString()); forceLoad }
+        val scheme = uri.scheme?.lowercase()
+        return when (scheme) {
+            "http", "https" -> {
+                if (forceLoad) view.loadUrl(uri.toString())
+                forceLoad
+            }
             "intent" -> {
                 val fallback = runCatching {
                     Intent.parseUri(uri.toString(), Intent.URI_INTENT_SCHEME).getStringExtra("browser_fallback_url")
-                }.getOrNull()
-                if (fallback != null) view.loadUrl(fallback)
+                }.getOrNull()?.takeIf { it.startsWith("https://") || it.startsWith("http://") }
+                if (fallback != null) {
+                    view.loadUrl(fallback)
+                } else if (provider == Provider.Uber) {
+                    recoverUberPostLogin(view)
+                }
                 true
             }
-            else -> true // uber://, olacabs://, rapido:// etc.: stay on the web sign-in
+            "uber" -> {
+                if (provider == Provider.Uber) recoverUberPostLogin(view)
+                true
+            }
+            else -> true
+        }
+    }
+
+    private fun recoverUberPostLogin(view: WebView) {
+        CookieManager.getInstance().flush()
+        if (currentUberSessionToken() != null) {
+            signedIn()
+        } else {
+            view.loadUrl("https://m.uber.com/")
         }
     }
 
@@ -303,7 +362,6 @@ class WebLoginActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    /** Launch contract: input is the provider; result says how the page closed. */
     enum class Outcome { Cancelled, TappedDone, SignedIn }
 
     class Contract : ActivityResultContract<Provider, Outcome>() {
@@ -320,6 +378,8 @@ class WebLoginActivity : ComponentActivity() {
     companion object {
         const val EXTRA_PROVIDER = "provider"
         const val EXTRA_AUTO = "auto"
+
+        private val UBER_APP_HOSTS = setOf("m.uber.com", "riders.uber.com", "www.uber.com")
 
         /** Names of cookies and storage keys that look like a login session, comma-joined. */
         private const val SESSION_KEYS_JS =

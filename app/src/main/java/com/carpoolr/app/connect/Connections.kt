@@ -18,13 +18,37 @@ enum class Provider(
     val cookieUrl: String?,
     val appPackage: String
 ) {
-    // Uber: login-redirect sends straight to auth.uber.com/v2 (phone/email), then back to m.uber.com.
-    Uber("uber", "https://m.uber.com/go/login-redirect/?previousPathname=%2Fgo%2Fhome", "https://m.uber.com", "com.ubercab"),
+    // Open auth.uber.com/v2 directly with m.uber.com/ as next_url (avoids /go/login-redirect white screen).
+    Uber("uber", "https://auth.uber.com/v2/?next_url=https%3A%2F%2Fm.uber.com%2F", "https://m.uber.com", "com.ubercab"),
     Ola("ola", "https://book.olacabs.com/", "https://book.olacabs.com", "com.olacabs.customer"),
     // Rapido PWA's own phone-number login route; it stores {"data": token} in localStorage "token".
     Rapido("rapido", "https://m.rapido.bike/verify-phonenumber", "https://m.rapido.bike", "com.rapido.passenger");
 
     val signsInOnWeb: Boolean get() = loginUrl != null
+}
+
+/** Strips both "; wv" and "Version/4.0 " so sites treat WebView as standard Chrome Mobile on Android. */
+internal fun cleanMobileChromeUa(raw: String): String = raw
+    .replace("; wv)", ")")
+    .replace("; wv", "")
+    .replace(Regex("""Version/\d+\.\d+\s+"""), "")
+
+internal fun cookieNamesFor(vararg urls: String): Set<String> {
+    val cm = CookieManager.getInstance()
+    val out = HashSet<String>()
+    for (u in urls) {
+        cm.getCookie(u)?.split(';')?.forEach { pair ->
+            val name = pair.substringBefore('=').trim()
+            if (name.isNotEmpty()) out += name
+        }
+    }
+    return out
+}
+
+/** True once auth.uber.com has issued an authenticated .uber.com session cookie (HttpOnly sid / jwt-session). */
+internal fun hasUberSessionCookie(): Boolean {
+    val names = cookieNamesFor("https://m.uber.com", "https://auth.uber.com", "https://riders.uber.com")
+    return names.any { it.equals("sid", ignoreCase = true) || it.equals("jwt-session", ignoreCase = true) }
 }
 
 class ConnectionStore(context: Context) {
@@ -38,22 +62,34 @@ class ConnectionStore(context: Context) {
         prefs.edit().putBoolean(p.name, true).apply()
     }
 
-    /** Called when the user finishes a web sign-in. True only if the site actually set cookies. */
+    /** Called when the user manually taps "done" on a web sign-in. */
     fun markSignedIn(p: Provider): Boolean {
         val url = p.cookieUrl ?: return false
         CookieManager.getInstance().flush()
-        val hasCookies = !CookieManager.getInstance().getCookie(url).isNullOrBlank()
-        prefs.edit().putBoolean(p.name, hasCookies).apply()
-        return hasCookies
+        val ok = when (p) {
+            Provider.Uber -> hasUberSessionCookie()
+            else -> !CookieManager.getInstance().getCookie(url).isNullOrBlank()
+        }
+        prefs.edit().putBoolean(p.name, ok).apply()
+        return ok
     }
 
     fun disconnect(p: Provider) {
         prefs.edit().putBoolean(p.name, false).apply()
         val url = p.cookieUrl ?: return
         val cm = CookieManager.getInstance()
+        val rootDomain = Uri.parse(url).host?.let { h ->
+            val parts = h.split('.')
+            if (parts.size >= 2) "." + parts.takeLast(2).joinToString(".") else null
+        }
         cm.getCookie(url)?.split(";")?.forEach { pair ->
             val name = pair.substringBefore("=").trim()
-            if (name.isNotEmpty()) cm.setCookie(url, "$name=; Max-Age=0")
+            if (name.isNotEmpty()) {
+                cm.setCookie(url, "$name=; Path=/; Max-Age=0")
+                if (rootDomain != null) {
+                    cm.setCookie(url, "$name=; Domain=$rootDomain; Path=/; Max-Age=0; Secure")
+                }
+            }
         }
         cm.flush()
     }

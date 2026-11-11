@@ -19,8 +19,10 @@ import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
@@ -313,9 +315,10 @@ class BookActivity : ComponentActivity() {
             databaseEnabled = true
             setGeolocationEnabled(true)
             mediaPlaybackRequiresUserGesture = false
+            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
             setSupportMultipleWindows(true)
             javaScriptCanOpenWindowsAutomatically = true
-            userAgentString = userAgentString.replace("; wv", "")
+            userAgentString = cleanMobileChromeUa(userAgentString)
         }
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
@@ -337,6 +340,11 @@ class BookActivity : ComponentActivity() {
             override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
                 scanDom(view)
             }
+
+            override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                if (!closed) runCatching { view.reload() }
+                return true
+            }
         }
         webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView, newProgress: Int) = onProgress(newProgress)
@@ -351,8 +359,14 @@ class BookActivity : ComponentActivity() {
                 }
             }
 
+            @SuppressLint("SetJavaScriptEnabled")
             override fun onCreateWindow(view: WebView, isDialog: Boolean, isUserGesture: Boolean, resultMsg: Message): Boolean {
-                val popup = WebView(view.context)
+                val popup = WebView(view.context).apply {
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.userAgentString = cleanMobileChromeUa(settings.userAgentString)
+                    CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
+                }
                 popup.webViewClient = object : WebViewClient() {
                     private var taken = false
                     private fun take(v: WebView, uri: Uri) {
