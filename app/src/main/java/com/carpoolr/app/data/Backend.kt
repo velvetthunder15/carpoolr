@@ -84,9 +84,41 @@ object Backend {
 
     suspend fun myProfile(): Profile? = client.postgrest.rpc("my_profile").decodeList<Profile>().firstOrNull()
 
-    suspend fun updateProfile(name: String, upi: String) {
-        client.postgrest.rpc("update_profile", buildJsonObject { put("p_name", name); put("p_upi", upi) })
+    suspend fun updateProfile(p: Profile) {
+        val fullParams = buildJsonObject {
+            put("p_name", p.displayName.orEmpty())
+            put("p_upi", p.upiId.orEmpty())
+            put("p_upi_verified", p.upiVerified)
+            put("p_phone", p.phone.orEmpty())
+            put("p_dob", p.dob.orEmpty())
+            put("p_gender", p.gender.orEmpty())
+            put("p_org_tag", p.orgTag.orEmpty())
+            put("p_emergency_name", p.emergencyName.orEmpty())
+            put("p_emergency_phone", p.emergencyPhone.orEmpty())
+            put("p_aadhaar_last4", p.aadhaarLast4.orEmpty())
+            put("p_aadhaar_verified", p.aadhaarVerified)
+            put("p_avatar_data", p.avatarData.orEmpty())
+        }
+        runCatching { client.postgrest.rpc("update_profile", fullParams) }.onFailure { e ->
+            // Graceful fallback if migration 0006 has not been applied on the server yet
+            if (e.message.orEmpty().contains("PGRST202") || e.message.orEmpty().contains("update_profile")) {
+                client.postgrest.rpc(
+                    "update_profile",
+                    buildJsonObject {
+                        put("p_name", p.displayName.orEmpty())
+                        put("p_upi", p.upiId.orEmpty())
+                    }
+                )
+            } else throw e
+        }
     }
+
+    suspend fun poolAvatars(poolId: String): Map<String, String> =
+        runCatching {
+            client.postgrest.rpc("pool_avatars", buildJsonObject { put("p_pool", poolId) })
+                .decodeList<RiderAvatar>()
+                .associate { it.riderId to it.avatarData }
+        }.getOrDefault(emptyMap())
 
     /** Google Places through our edge function (key stays on the server). */
     suspend fun searchPlaces(query: String, lat: Double?, lng: Double?): List<PlaceHit> {
@@ -142,7 +174,10 @@ data class PoolRider(
     val paid: Boolean = false,
     @SerialName("pool_status") val poolStatus: String? = null,
     @SerialName("fare_rupees") val fareRupees: Int? = null,
-    val provider: String? = null
+    val provider: String? = null,
+    @SerialName("aadhaar_verified") val aadhaarVerified: Boolean = false,
+    @SerialName("upi_verified") val upiVerified: Boolean = false,
+    @SerialName("org_tag") val orgTag: String? = null
 )
 
 @Serializable
@@ -184,7 +219,29 @@ data class ChatMessage(
 )
 
 @Serializable
-data class Profile(@SerialName("display_name") val displayName: String? = null, @SerialName("upi_id") val upiId: String? = null)
+data class Profile(
+    @SerialName("display_name") val displayName: String? = null,
+    @SerialName("upi_id") val upiId: String? = null,
+    @SerialName("upi_verified") val upiVerified: Boolean = false,
+    val phone: String? = null,
+    val dob: String? = null,
+    val gender: String? = null,
+    @SerialName("org_tag") val orgTag: String? = null,
+    @SerialName("emergency_name") val emergencyName: String? = null,
+    @SerialName("emergency_phone") val emergencyPhone: String? = null,
+    @SerialName("aadhaar_last4") val aadhaarLast4: String? = null,
+    @SerialName("aadhaar_verified") val aadhaarVerified: Boolean = false,
+    @SerialName("avatar_data") val avatarData: String? = null,
+    @SerialName("created_at") val createdAt: String? = null,
+    @SerialName("pools_count") val poolsCount: Int = 0,
+    @SerialName("km_shared") val kmShared: Double = 0.0
+)
+
+@Serializable
+data class RiderAvatar(
+    @SerialName("rider_id") val riderId: String,
+    @SerialName("avatar_data") val avatarData: String
+)
 
 @Serializable
 data class PlaceHit(val name: String, val address: String = "", val lat: Double, val lng: Double)

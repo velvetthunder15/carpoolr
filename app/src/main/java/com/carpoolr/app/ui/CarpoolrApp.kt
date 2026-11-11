@@ -1,6 +1,10 @@
 package com.carpoolr.app.ui
 
 import android.view.HapticFeedbackConstants
+import android.webkit.CookieManager
+import android.webkit.WebStorage
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
@@ -18,6 +22,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -31,26 +36,24 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.carpoolr.app.connect.ConnectionStore
+import com.carpoolr.app.connect.Provider
+import com.carpoolr.app.connect.WebLoginActivity
+import com.carpoolr.app.connect.openProviderApp
+import com.carpoolr.app.data.Backend
+import com.carpoolr.app.data.Profile
 import com.carpoolr.app.ui.components.CarpoolrBackground
 import com.carpoolr.app.ui.components.CarpoolrBottomBar
 import com.carpoolr.app.ui.components.CarpoolrTopBar
 import com.carpoolr.app.ui.components.ProfileContent
 import com.carpoolr.app.ui.components.SideSheet
 import com.carpoolr.app.ui.components.Tab
-import com.carpoolr.app.connect.ConnectionStore
-import com.carpoolr.app.data.Backend
-import kotlinx.coroutines.launch
-import com.carpoolr.app.connect.Provider
-import com.carpoolr.app.connect.openProviderApp
-import com.carpoolr.app.ui.screens.HomeScreen
-import com.carpoolr.app.connect.WebLoginActivity
-import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import com.carpoolr.app.ui.screens.RidesScreen
 import com.carpoolr.app.ui.screens.ChatScreen
-import com.carpoolr.app.data.Profile
+import com.carpoolr.app.ui.screens.HomeScreen
+import com.carpoolr.app.ui.screens.RidesScreen
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
+import kotlinx.coroutines.launch
 
 @Composable
 fun CarpoolrApp() {
@@ -72,19 +75,22 @@ fun CarpoolrApp() {
             WebLoginActivity.Outcome.TappedDone -> {
                 val ok = connections.markSignedIn(p)
                 connectionsVersion++
-                if (!ok) Toast.makeText(context, "${p.label} doesn't look signed in yet", Toast.LENGTH_SHORT).show()
+                if (ok) Toast.makeText(context, "${p.label} connected", Toast.LENGTH_SHORT).show()
+                else Toast.makeText(context, "${p.label} doesn't look signed in yet", Toast.LENGTH_SHORT).show()
             }
             WebLoginActivity.Outcome.Cancelled -> Unit
         }
     }
     val scope = rememberCoroutineScope()
     var profile by remember { mutableStateOf<Profile?>(null) }
-    androidx.compose.runtime.LaunchedEffect(profileOpen) {
-        if (profileOpen || profile == null) runCatching { Backend.myProfile() }.onSuccess { profile = it }
+    var savingProfile by remember { mutableStateOf(false) }
+
+    LaunchedEffect(profileOpen) {
+        if (profileOpen || profile == null) {
+            runCatching { Backend.myProfile() }.onSuccess { if (it != null) profile = it }
+        }
     }
 
-    // backgroundBackdrop: only the green field, sampled by glass cards inside the content.
-    // contentBackdrop: everything on screen, sampled by the floating top bar, tab bar and sheets.
     val backgroundBackdrop = rememberLayerBackdrop()
     val contentBackdrop = rememberLayerBackdrop()
 
@@ -150,24 +156,43 @@ fun CarpoolrApp() {
             ProfileContent(
                 onClose = { profileOpen = false },
                 isConnected = { p ->
-                    connectionsVersion // re-read after a sign-in
+                    connectionsVersion
                     connections.isConnected(p)
                 },
                 onConnect = { p ->
                     view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
                     if (p.signsInOnWeb) { pendingProvider = p.name; webLogin.launch(p) } else openProviderApp(context, p)
                 },
+                onDisconnect = { p ->
+                    connections.disconnect(p)
+                    connectionsVersion++
+                    Toast.makeText(context, "${p.label} disconnected", Toast.LENGTH_SHORT).show()
+                },
                 onSignOut = {
                     profileOpen = false
+                    Provider.entries.forEach { connections.disconnect(it) }
+                    runCatching {
+                        CookieManager.getInstance().removeAllCookies(null)
+                        CookieManager.getInstance().flush()
+                        WebStorage.getInstance().deleteAllData()
+                    }
                     scope.launch { runCatching { Backend.signOut() } }
                 },
-                name = profile?.displayName ?: "",
-                upi = profile?.upiId ?: "",
-                onSaveProfile = { n, u ->
+                profile = profile,
+                saving = savingProfile,
+                onSaveProfile = { updated ->
+                    savingProfile = true
                     scope.launch {
-                        runCatching { Backend.updateProfile(n, u) }
-                            .onSuccess { profile = Profile(n.ifBlank { null }, u.ifBlank { null }); Toast.makeText(context, "saved", Toast.LENGTH_SHORT).show() }
-                            .onFailure { Toast.makeText(context, "couldn't save", Toast.LENGTH_SHORT).show() }
+                        runCatching { Backend.updateProfile(updated) }
+                            .onSuccess {
+                                profile = updated
+                                Toast.makeText(context, "profile saved", Toast.LENGTH_SHORT).show()
+                            }
+                            .onFailure { e ->
+                                val msg = e.message?.lineSequence()?.firstOrNull()?.take(100)?.lowercase() ?: "couldn't save"
+                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                            }
+                        savingProfile = false
                     }
                 },
                 onRow = { label ->
@@ -181,11 +206,9 @@ fun CarpoolrApp() {
                             context.startActivity(android.content.Intent(android.content.Intent.ACTION_SENDTO,
                                 android.net.Uri.parse("mailto:chiragrasane15@gmail.com?subject=carpoolr%20help")))
                         }
-                        "about" -> Toast.makeText(context, "carpoolr beta", Toast.LENGTH_SHORT).show()
                     }
                 }
             )
         }
-
     }
 }

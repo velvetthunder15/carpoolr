@@ -67,5 +67,7 @@ dependencies {
     implementation(libs.supabase.functions)
     implementation(libs.androidx.webkit)
     implementation(libs.ktor.client.okhttp)
+    implementation(libs.play.services.code.scanner)
+    implementation(libs.play.services.mlkit.barcode)
     testImplementation(libs.junit)
 }

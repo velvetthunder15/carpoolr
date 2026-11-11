@@ -5,6 +5,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -39,6 +40,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -55,6 +57,7 @@ import com.carpoolr.app.pool.FareSplit
 import com.carpoolr.app.pool.MatchService
 import com.carpoolr.app.connect.BookActivity
 import com.carpoolr.app.connect.Provider
+import com.carpoolr.app.profile.AvatarCodec
 import com.carpoolr.app.ui.components.GlassCard
 import com.carpoolr.app.ui.components.pressScale
 import com.carpoolr.app.ui.components.staggeredEntrance
@@ -244,6 +247,11 @@ private fun PoolCard(
     val booked = first.poolStatus == "booked" && first.fareRupees != null
     val me = riders.firstOrNull { it.isMe } ?: first
     val booker = riders.firstOrNull { it.isBooker }
+    var avatars by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    LaunchedEffect(first.poolId, riders.size) {
+        val pid = first.poolId
+        avatars = if (pid != null) Backend.poolAvatars(pid) else emptyMap()
+    }
     val legs = remember(riders) { riders.map { FareSplit.Leg(it.riderId, it.boardKm, it.alightKm) } }
     val shares = remember(riders) {
         if (!pooled) emptyMap() else runCatching { FareSplit.splitLegs(first.fareRupees ?: 100, legs) }.getOrDefault(emptyMap())
@@ -271,7 +279,7 @@ private fun PoolCard(
                     "₹${first.fareRupees} on ${first.provider ?: "the ride app"}, booked by ${if (booker?.isMe == true) "you" else booker?.displayName ?: "the booker"}",
                     style = TextStyle(CarpoolrColors.Cream, 15.sp, fontWeight = FontWeight.Medium)
                 )
-                riders.forEach { r -> RiderRow(r, shares[r.riderId], booked) }
+                riders.forEach { r -> RiderRow(r, shares[r.riderId], booked, avatars[r.riderId]) }
                 if (pooled && !booked) BasicText(
                     "shares are by distance ridden. rupees appear once the cab is booked.",
                     style = TextStyle(CarpoolrColors.CreamMuted, 13.sp)
@@ -331,26 +339,43 @@ internal fun payUpi(context: android.content.Context, vpa: String, name: String,
 }
 
 @Composable
-private fun RiderRow(r: PoolRider, share: Int?, rupees: Boolean) {
+private fun RiderRow(r: PoolRider, share: Int?, rupees: Boolean, avatarData: String? = null) {
+    val avatarBmp = remember(avatarData) { AvatarCodec.decodeImageBitmap(avatarData) }
     Row(
         Modifier.fillMaxWidth().clip(RoundedRectangle(18.dp)).background(CarpoolrColors.Cream.copy(alpha = 0.08f))
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
-            Modifier.size(34.dp).clip(Capsule())
+            Modifier.size(36.dp).clip(Capsule())
                 .background(if (r.isMe) CarpoolrColors.Raspberry else CarpoolrColors.GreenLight),
             contentAlignment = Alignment.Center
         ) {
-            BasicText(
-                (if (r.isMe) "you" else r.displayName ?: "r").take(1),
-                style = TextStyle(Color.White, 15.sp, fontWeight = FontWeight.Bold)
-            )
+            if (avatarBmp != null) {
+                Image(
+                    bitmap = avatarBmp,
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                BasicText(
+                    (if (r.isMe) "you" else r.displayName ?: "r").take(1),
+                    style = TextStyle(Color.White, 15.sp, fontWeight = FontWeight.Bold)
+                )
+            }
         }
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
+            val badges = buildList {
+                if (r.aadhaarVerified) add("✓ id")
+                if (r.isBooker && r.status == "matched") add("books")
+                r.orgTag?.takeIf { it.isNotBlank() }?.let { add(it) }
+            }.joinToString(" · ")
             BasicText(
-                (if (r.isMe) "you" else (r.displayName ?: "rider")) + (if (r.isBooker && r.status == "matched") " · books" else ""),
+                (if (r.isMe) "you" else (r.displayName ?: "rider")) + (if (badges.isNotEmpty()) " · $badges" else ""),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 style = TextStyle(CarpoolrColors.Cream, 16.sp, fontWeight = FontWeight.Medium)
             )
             BasicText(
