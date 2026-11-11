@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "253373160672",
+    "project_id": "carpoolr-6673c",
+    "storage_bucket": "carpoolr-6673c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:253373160672:android:89376b7e461f98cf570485",
+        "android_client_info": {
+          "package_name": "com.carpoolr.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBzkgUSoKGLMj6PO14xiuoPQWKpanx7L0g"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

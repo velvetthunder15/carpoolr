@@ -124,10 +124,15 @@ object FirebasePhoneAuth {
         else -> {
             val m = e.message.orEmpty()
             when {
+                m.contains("OPERATION_NOT_ALLOWED", ignoreCase = true) ||
+                    m.contains("sign-in provider is disabled", ignoreCase = true) ->
+                    "enable phone sign-in in firebase console → authentication → sign-in method"
                 m.contains("BILLING_NOT_ENABLED", ignoreCase = true) ->
-                    "enable billing or add a test phone number in firebase auth console"
-                m.contains("app is not authorized", ignoreCase = true) || m.contains("SHA", ignoreCase = true) ->
-                    "register the apk sha-1 & sha-256 in firebase project settings"
+                    "firebase sms needs blaze plan (or add your number under phone numbers for testing in firebase console)"
+                m.contains("MISSING_CLIENT_IDENTIFIER", ignoreCase = true) ||
+                    m.contains("app is not authorized", ignoreCase = true) ||
+                    m.contains("SHA", ignoreCase = true) ->
+                    "add the apk sha-1 & sha-256 in firebase console → project settings"
                 else -> "couldn't verify phone: " + m.lineSequence().firstOrNull().orEmpty().take(100).lowercase()
             }
         }
